@@ -12,11 +12,12 @@ from queue import Queue
 from datetime import datetime, timedelta
 from calendar_checker import start_calendar_checker
 from get_list_area import start_list_area_checker
+from utils import debug_print, debug_queue
+from scheduler import Scheduler
 
 # 全域變數
 should_stop = False
 stop_event = threading.Event()
-debug_queue = Queue()
 last_refresh_time = None
 REFRESH_COOLDOWN = 2  # 刷新冷卻時間（秒）
 current_file_count = 0
@@ -24,12 +25,6 @@ last_known_position = 0
 is_date_switching = False  # 用於標記是否正在切換日期
 
 pyautogui.FAILSAFE = False
-
-def debug_print(message):
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    formatted_message = f"[{timestamp}] {message}"
-    debug_queue.put(formatted_message)
-    print(formatted_message)
 
 def check_esc_key():
     global should_stop
@@ -535,7 +530,7 @@ def execute_sequence():
         return
     is_date_switching = False  # 重置標記
     
-    # 4. 如果是週二到週五，執行額外步驟
+    # 4. 如果今天是週二到週五，執行額外步驟
     if is_weekday_2_to_5():
         debug_print("步驟4: 執行週二到週五的額外步驟")
         
@@ -596,6 +591,11 @@ def main():
         keyboard.add_hotkey('ctrl+e', execute_sequence)
         keyboard.add_hotkey('ctrl+d', download_current_list)
         keyboard.add_hotkey('ctrl+g', start_list_area_checker)
+        
+        # 初始化排程器
+        scheduler = Scheduler(execute_sequence)
+        scheduler_thread = scheduler.init_scheduler()
+        debug_print("已啟動排程器，將在每天上午 10:00 及 02:24 自動執行下載任務")
         
         # 保持程式運行，但允許 Ctrl+C 中斷
         keyboard.wait('ctrl+c')
