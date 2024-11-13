@@ -606,7 +606,7 @@ class MainApp:
 
     def run(self):
         try:
-            debug_print("=== 自動下載程式 ===")
+            debug_print("=== 研究報告自動下載程式 ===")
             """""
             keyboard.add_hotkey('ctrl+e', self.execute_sequence)
             keyboard.add_hotkey('ctrl+d', self.download_current_list)
@@ -624,11 +624,12 @@ class MainApp:
             debug_print("按下 CTRL+M 開始監控滑鼠點擊")
             """""
             debug_print("按下 ESC 停止下載")
+            debug_print("按下 CTRL+SHIFT+Q 關閉程式")
             self.scheduler = Scheduler(self.execute_sequence)
             scheduler_thread = self.scheduler.init_scheduler()
             schedule_times = Config.get_schedule_times()
             
-            keyboard.wait('ctrl+c')
+            keyboard.wait('ctrl+shift+q')
                 
         except KeyboardInterrupt:
             debug_print("\n程式已結束")
