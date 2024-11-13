@@ -607,16 +607,7 @@ class MainApp:
     def run(self):
         try:
             debug_print("=== 自動下載程式 ===")
-            debug_print("按下 CTRL+Q 或 CTRL+E 開始連續下載任務")
-            debug_print("按下 CTRL+D 下載當前列表檔案")
-            debug_print("按下 CTRL+G 檢測檔案列表區域")
-            debug_print("按下 CTRL+B 設定字型大小")
-            debug_print("按下 CTRL+T 切換列表刷新檢測")
-            debug_print("按下 CTRL+R 列出所有控件")
-            debug_print("按下 CTRL+M 開始監控滑鼠點擊")
-            debug_print("按下 ESC 停止下載")
-            
-            keyboard.add_hotkey('ctrl+q', self.execute_sequence)
+            """""
             keyboard.add_hotkey('ctrl+e', self.execute_sequence)
             keyboard.add_hotkey('ctrl+d', self.download_current_list)
             keyboard.add_hotkey('ctrl+g', start_list_area_checker)
@@ -624,7 +615,15 @@ class MainApp:
             keyboard.add_hotkey('ctrl+t', self.toggle_refresh_check)
             keyboard.add_hotkey('ctrl+r', list_all_controls)
             keyboard.add_hotkey('ctrl+m', monitor_clicks)
-            
+            debug_print("按下 CTRL+E 開始連續下載任務")
+            debug_print("按下 CTRL+D 下載當前列表檔案")
+            debug_print("按下 CTRL+G 檢測檔案列表區域")
+            debug_print("按下 CTRL+B 設定字型大小")
+            debug_print("按下 CTRL+T 切換列表刷新檢測")
+            debug_print("按下 CTRL+R 列出所有控件")
+            debug_print("按下 CTRL+M 開始監控滑鼠點擊")
+            """""
+            debug_print("按下 ESC 停止下載")
             self.scheduler = Scheduler(self.execute_sequence)
             scheduler_thread = self.scheduler.init_scheduler()
             schedule_times = Config.get_schedule_times()
