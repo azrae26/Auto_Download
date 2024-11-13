@@ -2,7 +2,7 @@ import keyboard
 import pywinauto
 import pyautogui
 import time
-from pywinauto.application import Application
+from pywinauto.application import Application as PywinautoApp
 import sys
 import psutil
 import win32gui
@@ -11,603 +11,521 @@ import threading
 from queue import Queue
 from datetime import datetime, timedelta
 from calendar_checker import start_calendar_checker
-from get_list_area import start_list_area_checker
-from utils import debug_print, debug_queue
+from get_list_area import start_list_area_checker, set_stop
+from utils import debug_print
 from scheduler import Scheduler
+from font_size_setter import set_font_size
 
-# 全域變數
-should_stop = False
-stop_event = threading.Event()
-last_refresh_time = None
-REFRESH_COOLDOWN = 2  # 刷新冷卻時間（秒）
-current_file_count = 0
-last_known_position = 0
-is_date_switching = False  # 用於標記是否正在切換日期
+class Config:
+    """配置類，集中管理所有配置參數"""
+    RETRY_LIMIT = 8  # 向上翻頁次數
+    SLEEP_INTERVAL = 0.1  # 等待時間
+    CLICK_BATCH_SIZE = 5  # 批次點擊次數
+    MOUSE_MAX_OFFSET = 100  # 滑鼠最大偏移量
+    TAB_SWITCH_COUNT = 3  # 切換列表次數
+    PAGE_SIZE = 10  # 每頁檔案數量
+    TARGET_WINDOW = "stocks"
+    PROCESS_NAME = "DOstocksBiz.exe"
 
-pyautogui.FAILSAFE = False
+    @staticmethod
+    def get_schedule_times():
+        return ["10:00"] # 排程時間
 
-def check_esc_key():
-    global should_stop
-    while True:
-        if keyboard.is_pressed('esc'):
-            should_stop = True
-            stop_event.set()
-            debug_print("\n[DEBUG] ESC 按鍵被按下，設置停止標誌")
-            break
-        time.sleep(0.1)
-
-def is_process_running(process_name):
-    for proc in psutil.process_iter(['name']):
-        try:
-            if proc.info['name'].lower() == process_name.lower():
-                return True
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            pass
-    return False
-
-def find_window_handle(target_title=None):
-    def callback(hwnd, windows):
-        if win32gui.IsWindowVisible(hwnd):
-            title = win32gui.GetWindowText(hwnd)
-            if target_title:
-                if target_title.lower() in title.lower():
+class WindowHandler:
+    """處理窗口相關操作"""
+    @staticmethod
+    def find_window_handle(target_title=None):
+        def callback(hwnd, windows):
+            if win32gui.IsWindowVisible(hwnd):
+                title = win32gui.GetWindowText(hwnd)
+                if target_title and target_title.lower() in title.lower():
                     windows.append((hwnd, title))
-            else:
-                if title:
+                elif not target_title and title:
                     windows.append((hwnd, title))
-    windows = []
-    win32gui.EnumWindows(callback, windows)
-    return windows
+        windows = []
+        win32gui.EnumWindows(callback, windows)
+        return windows
 
-selected_window = None
-
-def select_window(index):
-    global selected_window, should_stop, stop_event
-    should_stop = False
-    stop_event.clear()
-    
-    # 啟動按鍵監聽執行緒
-    esc_thread = threading.Thread(target=check_esc_key, daemon=True)
-    esc_thread.start()
-    
-    target_windows = find_window_handle("stocks")
-    if 1 <= index <= len(target_windows):
-        selected_window = target_windows[index - 1]
-        debug_print(f"\n已選擇視窗: {selected_window[1]}")
-        download_files()
-    else:
-        debug_print("無效的選擇")
-
-def safe_sleep(seconds):
-    """分段睡眠，同時檢查停止標誌"""
-    interval = 0.1
-    for _ in range(int((seconds/2) / interval)):  # 將等待時間減半
-        if should_stop:
-            debug_print("[DEBUG] 在等待期間檢測停止信號")
-            return False
-        time.sleep(interval)
-    return True
-
-def ensure_window_visible(hwnd, window_title):
-    """確保視窗可見且在前景"""
-    try:
-        if win32gui.IsIconic(hwnd):
-            debug_print(f"視窗 '{window_title}' 已最小化，正在還原...")
-            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-            time.sleep(0.2)  # 從0.5改為0.2
-        
+    @staticmethod
+    def ensure_window_visible(hwnd, window_title):
         try:
-            win32gui.SetForegroundWindow(hwnd)
-            time.sleep(0.2)  # 從0.5改為0.2
-            return True
-        except Exception as e:
-            debug_print(f"警告: 無法將視窗帶到前景: {str(e)}")
-            return False
-    except Exception as e:
-        debug_print(f"確保視窗可見時發生錯誤: {str(e)}")
-        return False
-
-def handle_refresh(files, i, last_click_x=None, last_click_y=None):
-    """處理列表刷新的情況"""
-    global last_refresh_time, current_file_count, last_known_position, is_date_switching
-    
-    current_time = datetime.now()
-    new_file_count = len(files)
-    
-    # 如果是日期切換造成的檔案數量變化，直接返回 False
-    if is_date_switching:
-        current_file_count = new_file_count
-        last_refresh_time = current_time
-        return False
-    
-    # 只在檔案數量突然改變時視為刷新
-    if current_file_count != 0 and new_file_count != current_file_count:
-        debug_print(f"檢測到列表刷新: 檔案數量從 {current_file_count} 變為 {new_file_count}")
-        
-        # 保存當前進度
-        last_known_position = i
-        
-        # 如果有上次的點擊位置，先將滑鼠移回安全位置
-        if last_click_x is not None and last_click_y is not None:
-            screen_width, screen_height = pyautogui.size()
-            pyautogui.moveTo(screen_width // 2, screen_height // 2)
-            time.sleep(0.2)
-        
-        time.sleep(0.5)  # 等待列表穩定
-        current_file_count = new_file_count
-        last_refresh_time = current_time
-        return True
-    
-    # 如果沒有檢測到刷新，只更新檔案數量
-    if current_file_count == 0:
-        current_file_count = new_file_count
-    
-    return False
-
-def is_file_visible(file, list_area):
-    """檢查檔案是否在對應列表的可視範圍內"""
-    try:
-        # 獲取檔案的位置
-        file_rect = file.rectangle()
-        file_center_y = (file_rect.top + file_rect.bottom) // 2
-        
-        # 檢查檔案中心點是否在列表可視範圍內
-        is_visible = (file_center_y >= list_area.top and 
-                     file_center_y <= list_area.bottom)
-        
-        return is_visible
-    except Exception as e:
-        debug_print(f"檢查檔案可見性時發生錯誤: {str(e)}")
-        return False
-
-def is_last_file_in_current_list(file_name):
-    """檢查是否為當前列表的最後一個檔案"""
-    # 晨訊列表的最後一個檔案通常是"群益"結尾
-    if file_name.startswith("晨訊") and file_name.endswith("群益"):
-        return True
-    return False
-
-def switch_to_next_list(hwnd):
-    """切換到下一個列表並設置向上搜尋"""
-    debug_print("開始切換列表: 點擊左鍵")
-    pyautogui.click()
-    time.sleep(0.5)
-    
-    debug_print("按下 3 次 TAB 切換列表")
-    for i in range(3):
-        pyautogui.press('tab')
-        time.sleep(0.2)
-    time.sleep(0.5)
-    
-    # 直接設置為向上搜尋模式
-    global searching_up, down_retry_count, up_retry_count, after_tab_switch
-    searching_up = True
-    down_retry_count = 8  # 跳過向下搜尋
-    up_retry_count = 0
-    after_tab_switch = True  # 新增標記，表示剛按完 TAB
-
-def reset_search_state():
-    """重置搜尋狀態為向下搜尋"""
-    global searching_up, down_retry_count, up_retry_count
-    searching_up = False
-    down_retry_count = 0
-    up_retry_count = 0
-
-def download_files():
-    try:
-        global selected_window, should_stop, last_known_position
-        
-        if should_stop:
-            debug_print("[DEBUG] 下載開始前檢測到停止信號")
-            return
-
-        # 檢查程式是否運行
-        if not is_process_running("DOstocksBiz.exe"):
-            debug_print("錯誤: DOstocksBiz.exe 未行，請先開啟程式")
-            return
-
-        # 如果還沒有選擇視窗，顯示可用的視窗列表
-        if not selected_window:
-            target_windows = find_window_handle("stocks")
-            
-            if not target_windows:
-                debug_print("錯誤: 找不到相關視窗")
-                return
-
-            debug_print("\n找到以下視窗:")
-            for i, (_, title) in enumerate(target_windows, 1):
-                debug_print(f"{i}. {title}")
-            debug_print("\n請按數字鍵 1-{} 選擇正確的視窗".format(len(target_windows)))
-            return
-
-        hwnd, window_title = selected_window
-
-        if should_stop:
-            debug_print("[DEBUG] 視窗選擇後檢測到停止信號")
-            return
-
-        # 確保視窗可見
-        if not ensure_window_visible(hwnd, window_title):
-            debug_print("錯誤: 無法確保視窗可見")
-            return
-
-        if should_stop:
-            debug_print("[DEBUG] 視窗前景化後檢測到停止信號")
-            return
-
-        # 連接到程式
-        app = Application(backend="uia").connect(handle=hwnd)
-        main_window = app.window(handle=hwnd)
-        
-        # 獲取所有檔案元素
-        debug_print("正在掃描檔案列表...")
-        files = main_window.descendants(control_type="ListItem")
-        
-        if not files:
-            debug_print("警告: 沒有找到可下載的檔案")
-            return
-
-        debug_print(f"找到 {len(files)} 個檔案")
-        
-        # 記錄上一次成功的點擊位置
-        last_click_x = None
-        last_click_y = None
-        # 設定允許的最大偏移距離（像素）
-        MAX_MOUSE_OFFSET = 100
-        
-        # 獲取列表區域的位置資訊
-        list_areas = start_list_area_checker()
-        if not list_areas or len(list_areas) < 3:
-            debug_print("警告: 無法獲取完整的列表區域資訊")
-            return
-
-        # 使用第二個列表區域（主要的檔案列表）
-        main_list_area = list_areas[1]  # 第二個列表區域
-        
-        # 添加一個標記，用於識別是否為第一次點擊
-        is_first_click = True
-        # 添加計數器，用於追蹤連續點擊次數
-        click_count = 0
-        
-        # 將搜尋狀態變數移到函數開頭
-        global searching_up, down_retry_count, up_retry_count, after_tab_switch
-        searching_up = False
-        down_retry_count = 0
-        up_retry_count = 0
-        after_tab_switch = False  # 初始化 TAB 切換標記
-        
-        # 遍歷並下載所有檔案
-        i = last_known_position
-        while i < len(files):
-            if should_stop:
-                debug_print("[DEBUG] 檔案迴圈中檢測到止信號")
-                return
+            if win32gui.IsIconic(hwnd):
+                debug_print(f"視窗 '{window_title}' 已最小化，正在還原...")
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                time.sleep(Config.SLEEP_INTERVAL)
             
             try:
-                # 處理刷新，傳入最後的點擊位置
-                if handle_refresh(files, i, last_click_x, last_click_y):
-                    # 重新獲取檔案列表
-                    files = main_window.descendants(control_type="ListItem")
-                    
-                    # 如果位置超出新的列表範圍，重置到最後一個有效位置
-                    if last_known_position >= len(files):
-                        last_known_position = max(0, len(files) - 1)
-                    
-                    # 恢復到上次的位置
-                    if last_known_position > 0:
-                        debug_print(f"嘗試恢復到位置 {last_known_position}")
-                        # 使用 Page Down 快速到達目標位置附近
-                        pages_needed = last_known_position // 10
-                        for _ in range(pages_needed):
-                            pyautogui.press('pagedown')
-                            time.sleep(0.1)
-                        
-                        # 重新獲取當前檔案的位置
-                        try:
-                            current_file = files[i]
-                            rect = current_file.rectangle()
-                            center_x = (rect.left + rect.right) // 2
-                            center_y = (rect.top + rect.bottom) // 2
-                            
-                            # 移動到檔案位置
-                            pyautogui.moveTo(center_x, center_y)
-                            time.sleep(0.2)
-                        except Exception as e:
-                            debug_print(f"恢復滑鼠位置時發生錯誤: {str(e)}")
-                    
-                    continue
-                
-                # 每次點擊前確保視窗可見
-                if not ensure_window_visible(hwnd, window_title):
-                    debug_print("警告: 無法確保視窗可見，重試當前檔案")
-                    continue
-                
-                file = files[i]
-                file_name = file.window_text()
-                
-                # 重置搜尋狀態（除非是剛按完 TAB）
-                if not after_tab_switch:
-                    reset_search_state()
-                
-                while not is_file_visible(file, main_list_area):
-                    if should_stop:
-                        return
-                    
-                    # 根據是否剛按完 TAB 決定搜尋方向
-                    if after_tab_switch:
-                        # TAB 切換後直接向上搜尋
-                        if up_retry_count < 8:
-                            debug_print(f"檔案 '{file_name}' 不在可視範圍內，向上翻頁 (第 {up_retry_count + 1} 次)")
-                            win32gui.SetForegroundWindow(hwnd)
-                            time.sleep(0.2)
-                            pyautogui.press('pageup')
-                            time.sleep(0.5)
-                            up_retry_count += 1
-                        else:
-                            # 向上找完都找不到，切換到下一個列表
-                            debug_print(f"無法在當前列表找到檔案 '{file_name}'，嘗試切換到下一個列表")
-                            win32gui.SetForegroundWindow(hwnd)
-                            time.sleep(0.2)
-                            switch_to_next_list(hwnd)
-                            continue
-                    else:
-                        # 一般情況：先向下找再向上找
-                        if not searching_up and down_retry_count < 8:
-                            debug_print(f"檔案 '{file_name}' 不在可視範圍內，向下翻頁 (第 {down_retry_count + 1} 次)")
-                            win32gui.SetForegroundWindow(hwnd)
-                            time.sleep(0.2)
-                            pyautogui.press('pagedown')
-                            time.sleep(0.5)
-                            down_retry_count += 1
-                        elif not searching_up and down_retry_count >= 8:
-                            debug_print("向下找不到，開始向上翻頁尋找")
-                            searching_up = True
-                        elif searching_up and up_retry_count < 8:
-                            debug_print(f"檔案 '{file_name}' 不在可視範圍內，向上翻頁 (第 {up_retry_count + 1} 次)")
-                            win32gui.SetForegroundWindow(hwnd)
-                            time.sleep(0.2)
-                            pyautogui.press('pageup')
-                            time.sleep(0.5)
-                            up_retry_count += 1
-                        else:
-                            # 都找不到，切換到下一個列表
-                            debug_print(f"無法在當前列表找到檔案 '{file_name}'，嘗試切換到下一個列表")
-                            win32gui.SetForegroundWindow(hwnd)
-                            time.sleep(0.2)
-                            switch_to_next_list(hwnd)
-                            continue
-                
-                # 找到檔案後，重置 TAB 切換標記
-                after_tab_switch = False
-                
-                # 檢查檔名是否以"_公司"結尾
-                if file_name.endswith("_公司"):
-                    debug_print(f"跳過檔案 ({i+1}/{len(files)}): {file_name} (檔名以_公司結尾)")
-                    i += 1
-                    continue
-                
-                # 獲取檔案位置
-                rect = file.rectangle()
-                center_x = (rect.left + rect.right) // 2
-                center_y = (rect.top + rect.bottom) // 2
-                
-                # 檢查滑鼠位置是否偏離太多
-                current_mouse_x, current_mouse_y = pyautogui.position()
-                if last_click_x is not None and last_click_y is not None:
-                    offset_x = abs(current_mouse_x - last_click_x)
-                    offset_y = abs(current_mouse_y - last_click_y)
-                    
-                    if offset_x > MAX_MOUSE_OFFSET or offset_y > MAX_MOUSE_OFFSET:
-                        debug_print(f"檢測到滑鼠偏移過大 (x:{offset_x}, y:{offset_y})")
-                        debug_print("暫停下載...")
-                        time.sleep(0.5)
-                        
-                        debug_print(f"重新定位到當前檔案: {file_name}")
-                        
-                        # 將滑鼠移到螢幕中央
-                        screen_width, screen_height = pyautogui.size()
-                        pyautogui.moveTo(screen_width // 2, screen_height // 2)
-                        time.sleep(0.2)
-                        
-                        # 將滑鼠移到目標檔案位置
-                        pyautogui.moveTo(center_x, center_y)
-                        time.sleep(0.2)
-                        
-                        debug_print("繼續下載...")
-                        continue
-                
-                debug_print(f"正在下載 ({i+1}/{len(files)}): {file_name}")
-                
-                if should_stop:
-                    debug_print("[DEBUG] 點擊前檢測到停止信號")
-                    return
-                
-                # 先移動到目標位置
-                pyautogui.moveTo(center_x, center_y)
-                time.sleep(0.2)
-                
-                # 執行點擊並記錄位置
-                pyautogui.doubleClick()
-                last_click_x = center_x
-                last_click_y = center_y
-                
-                # 在雙擊後執行 CTRL+W，但跳過第一次
-                if not is_first_click:
-                    click_count += 1
-                    if click_count == 5:
-                        time.sleep(0.3)
-                        for _ in range(5):
-                            pyautogui.hotkey('ctrl', 'w')
-                            time.sleep(0.2)
-                        click_count = 0
-                else:
-                    is_first_click = False
-                    time.sleep(0.5)
-
-                if not safe_sleep(0.1):
-                    return
-                
-                # 如果是最後一個檔案，下載完後再切換列表
-                if is_last_file_in_current_list(file_name):
-                    debug_print(f"檔案 '{file_name}' 是當前列表的最後一個檔案，準備切換到下一個列表")
-                    win32gui.SetForegroundWindow(hwnd)
-                    time.sleep(0.2)
-                    switch_to_next_list(hwnd)  # 切換列表並自動設置搜尋狀態
-                
-                i += 1
-                last_known_position = i
-                
+                win32gui.SetForegroundWindow(hwnd)
+                time.sleep(Config.SLEEP_INTERVAL)
+                return True
             except Exception as e:
-                debug_print(f"下載檔案時發生錯誤: {str(e)}")
-                i += 1
-                continue
-            
-        # 處理最後剩餘的未關閉視窗
-        if click_count > 0:
-            time.sleep(0.3)
-            for _ in range(click_count):
-                pyautogui.hotkey('ctrl', 'w')
-                time.sleep(0.1)
-        
-        debug_print("所有檔案下載完成")
-        last_known_position = 0  # 重置位置
-        
-    except Exception as e:
-        debug_print(f"發生錯誤: {str(e)}")
-        debug_print("\n請確保:")
-        debug_print("1. DOstocksBiz.exe 已經開啟")
-        debug_print("2. 視窗未最小化")
-        debug_print("3. 已選擇正確的視窗")
-    finally:
-        if should_stop:
-            debug_print("[DEBUG] 下載函數結束時的最終停止信號檢查")
+                debug_print(f"警告: 無法將視窗帶到前景: {str(e)}")
+                return False
+        except Exception as e:
+            debug_print(f"確保視窗可見時發生錯誤: {str(e)}")
+            return False
 
-def is_weekday_2_to_5():
-    weekday = datetime.now().weekday()  # 0是週一，6是週日
-    return 1 <= weekday <= 4  # 週二到週五
+    @staticmethod
+    def is_process_running(process_name):
+        for proc in psutil.process_iter(['name']):
+            try:
+                if proc.info['name'].lower() == process_name.lower():
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+        return False
 
-def execute_sequence():
-    global should_stop, stop_event, is_date_switching
-    
-    # 重置停止標誌
-    should_stop = False
-    stop_event.clear()
-    
-    debug_print("開始執行連續任務...")
-    
-    # 啟動按鍵監聽執行緒
-    esc_thread = threading.Thread(target=check_esc_key, daemon=True)
-    esc_thread.start()
-    
-    # 將滑鼠移到螢幕中央的函數
-    def move_mouse_to_safe_position():
+class MouseController:
+    """處理滑鼠相關操作"""
+    @staticmethod
+    def move_to_safe_position():
         screen_width, screen_height = pyautogui.size()
         pyautogui.moveTo(screen_width // 2, screen_height // 2)
-        time.sleep(0.5)
-    
-    # 1. 點擊今日日期
-    debug_print("步驟1: 點擊今日日期")
-    is_date_switching = True  # 設置日期切換標記
-    move_mouse_to_safe_position()
-    start_calendar_checker()
-    if not safe_sleep(1):
-        return
-    is_date_switching = False  # 重置標記
-        
-    # 2. 下載檔案
-    debug_print("步驟2: 下載檔案")
-    move_mouse_to_safe_position()
-    select_window(1)
-    if not safe_sleep(1):
-        return
-        
-    # 3. 再次點擊今日
-    debug_print("步驟3: 再次點擊今日")
-    is_date_switching = True  # 設置日期切換標記
-    move_mouse_to_safe_position()
-    start_calendar_checker()
-    if not safe_sleep(1):
-        return
-    is_date_switching = False  # 重置標記
-    
-    # 4. 如果今天是週二到週五，執行額外步驟
-    if is_weekday_2_to_5():
-        debug_print("步驟4: 執行週二到週五的額外步驟")
-        
-        move_mouse_to_safe_position()
-        pyautogui.press('left')
-        if not safe_sleep(1):
-            return
-        select_window(1)
-        if not safe_sleep(1):
-            return
-            
-        move_mouse_to_safe_position()
-        start_calendar_checker()
-        if not safe_sleep(1):
-            return
-            
-        move_mouse_to_safe_position()
-        pyautogui.press('up')
-        if not safe_sleep(1):
-            return
-        select_window(1)
-        
-    debug_print("連續任務執行完成")
+        time.sleep(Config.SLEEP_INTERVAL)
 
-def download_current_list():
-    """只下載當前列表的檔案"""
-    global should_stop, stop_event
-    
-    # 重置停止標誌
-    should_stop = False
-    stop_event.clear()
-    
-    debug_print("開始下載當前列表檔案...")
-    
-    # 啟動按鍵監聽執行緒
-    esc_thread = threading.Thread(target=check_esc_key, daemon=True)
-    esc_thread.start()
-    
-    # 將滑鼠移到螢幕中央
-    screen_width, screen_height = pyautogui.size()
-    pyautogui.moveTo(screen_width // 2, screen_height // 2)
-    time.sleep(0.5)
-    
-    # 執行下載
-    select_window(1)
+    @staticmethod
+    def is_position_safe(current_x, current_y, last_x, last_y):
+        if last_x is None or last_y is None:
+            return True
+        offset_x = abs(current_x - last_x)
+        offset_y = abs(current_y - last_y)
+        return offset_x <= Config.MOUSE_MAX_OFFSET and offset_y <= Config.MOUSE_MAX_OFFSET
 
-def main():
-    try:
-        debug_print("=== 自動下載程式 ===")
-        debug_print("按下 CTRL+Q 或 CTRL+E 開始連續下載任務")
-        debug_print("按下 CTRL+D 下載當前列表檔案")
-        debug_print("按下 CTRL+G 檢測檔案列表區域")
-        debug_print("按下 ESC 停止下載")
-        debug_print("請確保 DOstocksBiz.exe 已開啟且視窗可見")
+    @staticmethod
+    def click_file(center_x, center_y, is_first_click=False):
+        pyautogui.moveTo(center_x, center_y)
+        time.sleep(Config.SLEEP_INTERVAL)
+        pyautogui.doubleClick()
+        if not is_first_click:
+            time.sleep(Config.SLEEP_INTERVAL * 2)
+        else:
+            time.sleep(Config.SLEEP_INTERVAL * 5)
+
+class ListNavigator:
+    """處理列表導航相關操作"""
+    def __init__(self):
+        self.searching_up = False
+        self.down_retry_count = 0
+        self.up_retry_count = 0
+        self.after_tab_switch = False
+
+    def reset_search_state(self):
+        self.searching_up = False
+        self.down_retry_count = 0
+        self.up_retry_count = 0
+
+    def switch_to_next_list(self, hwnd):
+        debug_print("開始切換列表: 點擊左鍵")
+        pyautogui.click()
+        time.sleep(Config.SLEEP_INTERVAL * 5)
         
-        # 註冊快捷鍵
-        keyboard.add_hotkey('ctrl+q', execute_sequence)
-        keyboard.add_hotkey('ctrl+e', execute_sequence)
-        keyboard.add_hotkey('ctrl+d', download_current_list)
-        keyboard.add_hotkey('ctrl+g', start_list_area_checker)
+        debug_print(f"按下 {Config.TAB_SWITCH_COUNT} 次 TAB 切換列表")
+        for _ in range(Config.TAB_SWITCH_COUNT):
+            pyautogui.press('tab')
+            time.sleep(Config.SLEEP_INTERVAL * 2)
+        time.sleep(Config.SLEEP_INTERVAL * 5)
         
-        # 初始化排程器
-        scheduler = Scheduler(execute_sequence)
-        scheduler_thread = scheduler.init_scheduler()
-        debug_print("已啟動排程器，將在每天上午 10:00 及 02:24 自動執行下載任務")
+        self.searching_up = True
+        self.down_retry_count = Config.RETRY_LIMIT
+        self.up_retry_count = 0
+        self.after_tab_switch = True
+
+    def navigate_to_file(self, file, main_list_area, hwnd, file_name):
+        if not self.after_tab_switch:
+            self.reset_search_state()
         
-        # 保持程式運行，但允許 Ctrl+C 中斷
-        keyboard.wait('ctrl+c')
+        while not FileProcessor.is_file_visible(file, main_list_area):
+            if self.after_tab_switch:
+                if self.up_retry_count < Config.RETRY_LIMIT:
+                    debug_print(f"檔案 '{file_name}' 不在可視範圍內，向上翻頁 (第 {self.up_retry_count + 1} 次)")
+                    win32gui.SetForegroundWindow(hwnd)
+                    time.sleep(Config.SLEEP_INTERVAL * 2)
+                    pyautogui.press('pageup')
+                    time.sleep(Config.SLEEP_INTERVAL * 5)
+                    self.up_retry_count += 1
+                else:
+                    debug_print(f"無法在當前列表找到案 '{file_name}'，嘗試切換到下一個列表")
+                    win32gui.SetForegroundWindow(hwnd)
+                    time.sleep(Config.SLEEP_INTERVAL * 2)
+                    self.switch_to_next_list(hwnd)
+                    return False
+            else:
+                if not self.searching_up and self.down_retry_count < Config.RETRY_LIMIT:
+                    debug_print(f"檔案 '{file_name}' 不在可視範圍內，向下翻頁 (第 {self.down_retry_count + 1} 次)")
+                    win32gui.SetForegroundWindow(hwnd)
+                    time.sleep(Config.SLEEP_INTERVAL * 2)
+                    pyautogui.press('pagedown')
+                    time.sleep(Config.SLEEP_INTERVAL * 5)
+                    self.down_retry_count += 1
+                elif not self.searching_up and self.down_retry_count >= Config.RETRY_LIMIT:
+                    debug_print("向下找不到，開始向上翻頁尋找")
+                    self.searching_up = True
+                elif self.searching_up and self.up_retry_count < Config.RETRY_LIMIT:
+                    debug_print(f"檔案 '{file_name}' 不在可視範圍內，向上翻頁 (第 {self.up_retry_count + 1} 次)")
+                    win32gui.SetForegroundWindow(hwnd)
+                    time.sleep(Config.SLEEP_INTERVAL * 2)
+                    pyautogui.press('pageup')
+                    time.sleep(Config.SLEEP_INTERVAL * 5)
+                    self.up_retry_count += 1
+                else:
+                    debug_print(f"無法在當前列表找到檔案 '{file_name}'，嘗試切換到下一個列表")
+                    win32gui.SetForegroundWindow(hwnd)
+                    time.sleep(Config.SLEEP_INTERVAL * 2)
+                    self.switch_to_next_list(hwnd)
+                    return False
+        return True
+
+class FileProcessor:
+    """處理文件相關操作"""
+    def __init__(self):
+        self.current_file_count = 0
+        self.last_known_position = 0
+        self.is_date_switching = False
+        pyautogui.FAILSAFE = False
+
+    @staticmethod
+    def is_file_visible(file, list_area):
+        try:
+            file_rect = file.rectangle()
+            file_center_y = (file_rect.top + file_rect.bottom) // 2
+            return (file_center_y >= list_area.top and file_center_y <= list_area.bottom)
+        except Exception as e:
+            debug_print(f"檢查檔案可見性時發生錯誤: {str(e)}")
+            return False
+
+    @staticmethod
+    def is_last_file_in_current_list(file, current_list_items):
+        """判斷是否為當前列表的最後一個檔案"""
+        try:
+            # 獲取當前檔案在列表中的索引
+            current_index = current_list_items.index(file)
+            # 如果是列表中的最後一個項目
+            return current_index == len(current_list_items) - 1
+        except Exception as e:
+            debug_print(f"檢查檔案位置時發生錯誤: {str(e)}")
+            return False
+
+    def handle_refresh(self, files, i, last_click_x=None, last_click_y=None):
+        new_file_count = len(files)
+        
+        if self.is_date_switching:
+            self.current_file_count = new_file_count
+            return False
+        
+        if self.current_file_count != 0 and new_file_count != self.current_file_count:
+            debug_print(f"檢測到列表刷新: 檔案數量從 {self.current_file_count} 變為 {new_file_count}")
+            self.last_known_position = i
             
-    except KeyboardInterrupt:
-        debug_print("\n程式已結束")
-    finally:
-        keyboard.unhook_all()
+            if last_click_x is not None and last_click_y is not None:
+                MouseController.move_to_safe_position()
+            
+            time.sleep(Config.SLEEP_INTERVAL * 5)
+            self.current_file_count = new_file_count
+            return True
+        
+        if self.current_file_count == 0:
+            self.current_file_count = new_file_count
+        
+        return False
+
+    def close_windows(self, count):
+        """關閉指定數量的視窗"""
+        if count <= 0:
+            return
+        
+        time.sleep(0.3)  # 等待視窗完全打開
+        
+        try:
+            # 按下 CTRL
+            keyboard.press('ctrl')
+            time.sleep(0.2)  # 等待 0.2秒 確保 CTRL 被按下
+            
+            # 按指定次數的 W
+            for _ in range(count):
+                keyboard.press('w')
+                time.sleep(0.1)  # 間隔 0.1秒
+                keyboard.release('w')
+                time.sleep(0.1)  # 間隔 0.1秒
+            
+            # 釋放 CTRL
+            keyboard.release('ctrl')
+            time.sleep(0.1)  # 等待 0.1秒 所有視窗關閉
+            
+        except Exception as e:
+            debug_print(f"關閉視窗時發生錯誤: {str(e)}")
+            # 確保 CTRL 鍵被釋放
+            keyboard.release('ctrl')
+
+    def process_files(self, app, hwnd, window_title, should_stop_callback):
+        try:
+            if should_stop_callback():
+                debug_print("[DEBUG] 下載開始前檢測到停止信號")
+                return
+
+            if not WindowHandler.is_process_running(Config.PROCESS_NAME):
+                debug_print(f"錯誤: {Config.PROCESS_NAME} 未運行，請先開啟程式")
+                return
+
+            if not WindowHandler.ensure_window_visible(hwnd, window_title):
+                debug_print("錯誤: 無法確保視窗可見")
+                return
+
+            main_window = app.window(handle=hwnd)
+            files = main_window.descendants(control_type="ListItem")
+            
+            if not files:
+                debug_print("警告: 沒有找到可下載的檔案")
+                return
+
+            debug_print(f"找到 {len(files)} 個檔案")
+            
+            last_click_x = None
+            last_click_y = None
+            is_first_click = True
+            click_count = 0
+            
+            list_areas = start_list_area_checker()
+            if not list_areas or len(list_areas) < 3:
+                debug_print("警告: 無法獲取完整的列表區域資訊")
+                return
+
+            main_list_area = list_areas[1]
+            current_list_items = main_window.descendants(control_type="ListItem")
+            
+            navigator = ListNavigator()
+            
+            i = self.last_known_position
+            while i < len(files):
+                if should_stop_callback():
+                    return
+                
+                try:
+                    if self.handle_refresh(files, i, last_click_x, last_click_y):
+                        files = main_window.descendants(control_type="ListItem")
+                        if self.last_known_position >= len(files):
+                            self.last_known_position = max(0, len(files) - 1)
+                        if self.last_known_position > 0:
+                            debug_print(f"嘗試恢復到位置 {self.last_known_position}")
+                            pages_needed = self.last_known_position // Config.PAGE_SIZE
+                            for _ in range(pages_needed):
+                                pyautogui.press('pagedown')
+                                time.sleep(Config.SLEEP_INTERVAL)
+                            try:
+                                current_file = files[i]
+                                rect = current_file.rectangle()
+                                center_x = (rect.left + rect.right) // 2
+                                center_y = (rect.top + rect.bottom) // 2
+                                pyautogui.moveTo(center_x, center_y)
+                                time.sleep(Config.SLEEP_INTERVAL * 2)
+                            except Exception as e:
+                                debug_print(f"恢復滑鼠位置時發生錯誤: {str(e)}")
+                        continue
+                    
+                    if not WindowHandler.ensure_window_visible(hwnd, window_title):
+                        debug_print("警告: 無法確保視窗可見，重試當前檔案")
+                        continue
+                    
+                    file = files[i]
+                    file_name = file.window_text()
+                    
+                    if not navigator.navigate_to_file(file, main_list_area, hwnd, file_name):
+                        continue
+                    
+                    navigator.after_tab_switch = False
+                    
+                    if file_name.endswith("_公司"):
+                        debug_print(f"跳過檔案 ({i+1}/{len(files)}): {file_name} (檔名以_公司結尾)")
+                        i += 1
+                        continue
+                    
+                    rect = file.rectangle()
+                    center_x = (rect.left + rect.right) // 2
+                    center_y = (rect.top + rect.bottom) // 2
+                    
+                    current_mouse_x, current_mouse_y = pyautogui.position()
+                    if not MouseController.is_position_safe(current_mouse_x, current_mouse_y, last_click_x, last_click_y):
+                        debug_print("檢測到滑鼠偏移過大")
+                        debug_print("暫停下載...")
+                        time.sleep(Config.SLEEP_INTERVAL * 5)
+                        debug_print(f"重新定位到當前檔案: {file_name}")
+                        MouseController.move_to_safe_position()
+                        pyautogui.moveTo(center_x, center_y)
+                        time.sleep(Config.SLEEP_INTERVAL * 2)
+                        debug_print("繼續下載...")
+                        continue
+                    
+                    debug_print(f"正在下載 ({i+1}/{len(files)}): {file_name}")
+                    
+                    if should_stop_callback():
+                        return
+                    
+                    MouseController.click_file(center_x, center_y, is_first_click)
+                    last_click_x = center_x
+                    last_click_y = center_y
+                    
+                    if not is_first_click:
+                        click_count += 1
+                        if click_count == Config.CLICK_BATCH_SIZE:
+                            time.sleep(Config.SLEEP_INTERVAL * 3)
+                            self.close_windows(Config.CLICK_BATCH_SIZE)
+                            click_count = 0
+                    else:
+                        is_first_click = False
+                        time.sleep(Config.SLEEP_INTERVAL * 5)
+
+                    time.sleep(Config.SLEEP_INTERVAL)
+                    
+                    if self.is_last_file_in_current_list(file, current_list_items):
+                        debug_print(f"檔案 '{file_name}' 是當前列表的最後一個檔案，準備切換到下一個列表")
+                        win32gui.SetForegroundWindow(hwnd)
+                        time.sleep(Config.SLEEP_INTERVAL * 2)
+                        navigator.switch_to_next_list(hwnd)
+                        # 切換列表後更新當前列表項目
+                        current_list_items = main_window.descendants(control_type="ListItem")
+                    
+                    i += 1
+                    self.last_known_position = i
+                    
+                except Exception as e:
+                    debug_print(f"下載檔案時發生錯誤: {str(e)}")
+                    i += 1
+                    continue
+            
+            if click_count > 0:
+                self.close_windows(click_count)
+            
+            debug_print("所有檔案下載完成")
+            self.last_known_position = 0
+            
+        except Exception as e:
+            debug_print(f"發生錯誤: {str(e)}")
+            debug_print("\n請確保:")
+            debug_print(f"1. {Config.PROCESS_NAME} 已經開啟")
+            debug_print("2. 視窗未最小化")
+            debug_print("3. 已選擇正確的視窗")
+
+class MainApp:
+    """主應用程序類"""
+    def __init__(self):
+        self.file_processor = FileProcessor()
+        self.selected_window = None
+        self.scheduler = None
+        self.should_stop = False
+        self.stop_event = threading.Event()
+
+    def check_esc_key(self):
+        """監聽 ESC 按鍵"""
+        while True:
+            if keyboard.is_pressed('esc'):
+                self.should_stop = True
+                debug_print("\n[DEBUG] ESC 按鍵被按下，停止執行")
+                break
+            time.sleep(0.1)
+
+    def select_window(self, index):
+        self.should_stop = False
+        self.stop_event.clear()
+        
+        esc_thread = threading.Thread(target=self.check_esc_key, daemon=True)
+        esc_thread.start()
+        
+        target_windows = WindowHandler.find_window_handle(Config.TARGET_WINDOW)
+        if 1 <= index <= len(target_windows):
+            self.selected_window = target_windows[index - 1]
+            debug_print(f"\n已選擇視窗: {self.selected_window[1]}")
+            hwnd, window_title = self.selected_window
+            app = PywinautoApp(backend="uia").connect(handle=hwnd)
+            self.file_processor.process_files(app, hwnd, window_title, lambda: self.should_stop)
+        else:
+            debug_print("無效的選擇")
+
+    def is_weekday_2_to_5(self):
+        weekday = datetime.now().weekday()
+        return 1 <= weekday <= 4
+
+    def execute_sequence(self):
+        """執行連續任務"""
+        self.should_stop = False
+        
+        # 啟動 ESC 監聽線程
+        esc_thread = threading.Thread(target=self.check_esc_key, daemon=True)
+        esc_thread.start()
+        
+        debug_print("開始執行連續任務...")
+        
+        # 每個步驟前都檢查是否要停止
+        steps = [
+            ("設定字型大小", lambda: set_font_size()),
+            ("點擊今日日期", lambda: start_calendar_checker()),
+            ("下載檔案", lambda: self.select_window(1)),
+            ("再次點擊今日", lambda: start_calendar_checker()),
+        ]
+        
+        # 如果是週二到週五，添加額外步驟
+        if self.is_weekday_2_to_5():
+            extra_steps = [
+                ("按左鍵", lambda: pyautogui.press('left')),
+                ("下載檔案", lambda: self.select_window(1)),
+                ("點擊今日", lambda: start_calendar_checker()),
+                ("按上鍵", lambda: pyautogui.press('up')),
+                ("下載檔案", lambda: self.select_window(1))
+            ]
+            steps.extend(extra_steps)
+        
+        # 執行所有步驟
+        for i, (step_name, step_func) in enumerate(steps, 1):
+            if self.should_stop:
+                debug_print("任務已停止")
+                return
+            
+            debug_print(f"步驟{i}: {step_name}")
+            step_func()
+            time.sleep(1)  # 每個步驟之間暫停1秒
+        
+        debug_print("連續任務執行完成")
+
+    def download_current_list(self):
+        self.should_stop = False
+        self.stop_event.clear()
+        
+        debug_print("開始下載當前列表檔案...")
+        
+        esc_thread = threading.Thread(target=self.check_esc_key, daemon=True)
+        esc_thread.start()
+        
+        MouseController.move_to_safe_position()
+        self.select_window(1)
+
+    def run(self):
+        try:
+            debug_print("=== 自動下載程式 ===")
+            debug_print("按下 CTRL+Q 或 CTRL+E 開始連續下載任務")
+            debug_print("按下 CTRL+D 下載當前列表檔案")
+            debug_print("按下 CTRL+G 檢測檔案列表區域")
+            debug_print("按下 ESC 停止下載")
+            debug_print(f"請確保 {Config.PROCESS_NAME} 已開啟且視窗可見")
+            
+            keyboard.add_hotkey('ctrl+q', self.execute_sequence)
+            keyboard.add_hotkey('ctrl+e', self.execute_sequence)
+            keyboard.add_hotkey('ctrl+d', self.download_current_list)
+            keyboard.add_hotkey('ctrl+g', start_list_area_checker)
+            keyboard.add_hotkey('ctrl+b', set_font_size)
+            
+            self.scheduler = Scheduler(self.execute_sequence)
+            scheduler_thread = self.scheduler.init_scheduler()
+            schedule_times = Config.get_schedule_times()
+            
+            keyboard.wait('ctrl+c')
+                
+        except KeyboardInterrupt:
+            debug_print("\n程式已結束")
+        finally:
+            keyboard.unhook_all()
 
 if __name__ == "__main__":
     try:
-        main()
+        app = MainApp()
+        app.run()
     except KeyboardInterrupt:
         debug_print("\n程式已結束")
     except Exception as e:

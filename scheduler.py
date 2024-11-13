@@ -16,12 +16,15 @@ class Scheduler:
     def start_scheduler(self):
         """啟動排程器"""
         debug_print("[排程器] 排程器已啟動")
-        debug_print("[排程器] 已設定每日上午 10:00 及 02:26 自動執行下載任務")
+
+        # 從 Config 獲取所有排程時間並設定
+        from main import Config
+        schedule_times = Config.get_schedule_times()
         
-        # 設定執行時間
-        schedule.every().day.at("10:00").do(self.run_scheduled_task)
-        # schedule.every().day.at("02:26").do(self.run_scheduled_task)
-        
+        for time_str in schedule_times:
+            schedule.every().day.at(time_str).do(self.run_scheduled_task)
+            debug_print(f"[排程器] 已設定每日 {time_str} 自動執行下載任務")
+                
         while True:
             schedule.run_pending()
             time.sleep(1)
