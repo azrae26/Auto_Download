@@ -3,7 +3,8 @@ from pywinauto.application import Application
 from datetime import datetime
 import pyautogui
 import time
-from utils import debug_print, find_window_handle
+from utils import (debug_print, find_window_handle, ensure_foreground_window, 
+                  calculate_center_position)
 
 class CalendarChecker:
     """日曆檢查器類"""
@@ -71,7 +72,12 @@ class CalendarChecker:
     def click_today(self):
         """點擊今日日期"""
         try:
+            rect = self.calendar.rectangle()
             x, y = self.calculate_click_position()
+            if x is None or y is None:
+                debug_print("無法計算點擊位置")
+                return False
+                
             debug_print(f"今天是 {datetime.now().day} 號")
             debug_print(f"計算得出的點擊位置: x={x}, y={y}")
             
@@ -95,11 +101,8 @@ def start_calendar_checker():
     if not checker.find_window():
         return
         
-    try:
-        win32gui.SetForegroundWindow(checker.hwnd)
-        time.sleep(0.2)
-    except Exception as e:
-        debug_print(f"警告: 無法將視窗帶到前景: {str(e)}")
+    if not ensure_foreground_window(checker.hwnd, checker.window_title):
+        debug_print("警告: 無法確保視窗在前景")
     
     if not checker.find_calendar():
         debug_print("無法找到日歷元素")

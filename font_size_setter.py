@@ -2,7 +2,7 @@ import win32gui
 import win32con
 from pywinauto.application import Application
 import time
-from utils import debug_print
+from utils import debug_print, ensure_foreground_window, calculate_center_position
 import pyautogui
 
 def set_font_size():
@@ -23,25 +23,8 @@ def set_font_size():
             
         # 將視窗帶到前景
         hwnd = windows[0][0]
-        try:
-            # 檢查視窗是否最小化
-            if win32gui.IsIconic(hwnd):
-                debug_print("視窗已最小化，正在還原...")
-                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                time.sleep(0.5)
-            
-            # 嘗試多次將視窗帶到前景
-            for _ in range(3):  # 最多嘗試3次
-                try:
-                    win32gui.SetForegroundWindow(hwnd)
-                    time.sleep(0.5)
-                    break
-                except:
-                    time.sleep(0.5)
-                    continue
-                    
-        except Exception as e:
-            debug_print(f"警告: 無法將視窗帶到前景，但將繼續執行: {str(e)}")
+        if not ensure_foreground_window(hwnd, windows[0][1]):
+            debug_print("警告: 無法確保視窗在前景，但將繼續執行")
         
         # 找到字型大小下拉選單
         app = Application(backend="uia").connect(handle=hwnd)
@@ -52,8 +35,14 @@ def set_font_size():
         
         # 點擊下拉選單右側按鈕
         rect = combo.rectangle()
-        click_x = rect.right - 10  # 右側按鈕位置
-        click_y = (rect.top + rect.bottom) // 2
+        center_x, center_y = calculate_center_position(rect)
+        if center_x is None or center_y is None:
+            debug_print("無法計算下拉選單位置")
+            return False
+            
+        # 調整到右側按鈕位置
+        click_x = rect.right - 10
+        click_y = center_y
         
         # 移動滑鼠到按鈕位置
         pyautogui.moveTo(click_x, click_y, duration=0.2)

@@ -12,7 +12,7 @@ from queue import Queue
 from datetime import datetime, timedelta
 from calendar_checker import start_calendar_checker
 from get_list_area import start_list_area_checker, set_stop
-from utils import debug_print, find_window_handle
+from utils import debug_print, find_window_handle, ensure_foreground_window, get_list_items, calculate_center_position, refresh_checking, start_refresh_check, stop_refresh_check
 from scheduler import Scheduler
 from font_size_setter import set_font_size
 
@@ -31,25 +31,6 @@ class Config:
 
 class WindowHandler:
     """處理窗口相關操作"""
-    @staticmethod
-    def ensure_window_visible(hwnd, window_title):
-        try:
-            if win32gui.IsIconic(hwnd):
-                debug_print(f"視窗 '{window_title}' 已最小化，正在還原...")
-                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                time.sleep(Config.SLEEP_INTERVAL)
-            
-            try:
-                win32gui.SetForegroundWindow(hwnd)
-                time.sleep(Config.SLEEP_INTERVAL)
-                return True
-            except Exception as e:
-                debug_print(f"警告: 無法將視窗帶到前景: {str(e)}")
-                return False
-        except Exception as e:
-            debug_print(f"確保視窗可見時發生錯誤: {str(e)}")
-            return False
-
     @staticmethod
     def is_process_running(process_name):
         for proc in psutil.process_iter(['name']):
@@ -116,16 +97,19 @@ class ListNavigator:
                 rect = next_list.rectangle()
                 
                 # 計算點擊位置（列表頂部往下 10px 的位置）
-                click_x = (rect.left + rect.right) // 2
+                center_x, center_y = calculate_center_position(rect)
+                if center_x is None or center_y is None:
+                    debug_print("無法計算列表位置")
+                    return
                 click_y = rect.top + 10
                 
                 # 移動到位置並點擊
-                pyautogui.moveTo(click_x, int(click_y))
+                pyautogui.moveTo(center_x, click_y)
                 time.sleep(Config.SLEEP_INTERVAL * 2)
                 pyautogui.click()
                 time.sleep(Config.SLEEP_INTERVAL * 2)
                 
-                debug_print(f"已點擊下一個列表位置: x={click_x}, y={int(click_y)}")
+                debug_print(f"已點擊下一個列表位置: x={center_x}, y={click_y}")
                 
             else:
                 debug_print("警告: 找不到足夠的列表區域")
@@ -136,6 +120,7 @@ class ListNavigator:
         self.after_tab_switch = True
 
     def navigate_to_file(self, file, main_list_area, hwnd, file_name):
+        """導航到指定檔案的位置"""
         if not self.after_tab_switch:
             self.reset_search_state()
         
@@ -192,10 +177,12 @@ class FileProcessor:
 
     @staticmethod
     def is_file_visible(file, list_area):
+        """檢查檔案是否在可視範圍內"""
         try:
             file_rect = file.rectangle()
+            list_rect = list_area.rectangle()  # 獲取列表區域的矩形
             file_center_y = (file_rect.top + file_rect.bottom) // 2
-            return (file_center_y >= list_area.top and file_center_y <= list_area.bottom)
+            return (file_center_y >= list_rect.top and file_center_y <= list_rect.bottom)
         except Exception as e:
             debug_print(f"檢查檔案可見性時發生錯誤: {str(e)}")
             return False
@@ -211,29 +198,6 @@ class FileProcessor:
         except Exception as e:
             debug_print(f"檢查檔案位置時發生錯誤: {str(e)}")
             return False
-
-    def handle_refresh(self, files, i, last_click_x=None, last_click_y=None):
-        new_file_count = len(files)
-        
-        if self.is_date_switching:
-            self.current_file_count = new_file_count
-            return False
-        
-        if self.current_file_count != 0 and new_file_count != self.current_file_count:
-            debug_print(f"檢測到列表刷新: 檔案數量從 {self.current_file_count} 變為 {new_file_count}")
-            self.last_known_position = i
-            
-            if last_click_x is not None and last_click_y is not None:
-                MouseController.move_to_safe_position()
-            
-            time.sleep(Config.SLEEP_INTERVAL * 5)
-            self.current_file_count = new_file_count
-            return True
-        
-        if self.current_file_count == 0:
-            self.current_file_count = new_file_count
-        
-        return False
 
     def close_windows(self, count):
         """關閉指定數量的視窗"""
@@ -264,12 +228,13 @@ class FileProcessor:
             keyboard.release('ctrl')
 
     def process_files(self, app, hwnd, window_title, should_stop_callback):
+        """處理檔案"""
         try:
             if should_stop_callback():
                 debug_print("[DEBUG] 下載開始前檢測到停止信號")
                 return
 
-            if not WindowHandler.ensure_window_visible(hwnd, window_title):
+            if not ensure_foreground_window(hwnd, window_title):
                 debug_print("錯誤: 無法確保視窗可見")
                 return
 
@@ -277,17 +242,28 @@ class FileProcessor:
             
             # 獲取所有列表區域
             list_areas = start_list_area_checker()
-            if not list_areas or len(list_areas) < 3:
-                debug_print("警告: 無法獲取完整的列表區域資訊")
+            if not list_areas:
+                debug_print("警告: 無法獲取列表區域資訊")
                 return
 
             # 獲取每個列表區域的檔案
             all_files = []
+            valid_areas = []  # 儲存有效的列表區域
+            
             for i, list_area in enumerate(['左側列表', '中間列表', '右側列表']):
                 debug_print(f"獲取{list_area}檔案...")
-                files = main_window.child_window(control_type="List", found_index=i).descendants(control_type="ListItem")
-                all_files.extend([(file, i) for file in files if not file.window_text().endswith("_公司")])
-                debug_print(f"{list_area}檔案數量: {len(files)}")
+                files = get_list_items(main_window, i)
+                if files:  # 只處理有檔案的列表
+                    file_count = len([f for f in files if not f.window_text().endswith("_公司")])
+                    if file_count > 0:  # 確保有可下載的檔案
+                        valid_files = [(file, len(valid_areas)) for file in files if not file.window_text().endswith("_公司")]
+                        all_files.extend(valid_files)
+                        valid_areas.append(list_areas[i])  # 儲存有效的列表區域
+                        debug_print(f"{list_area}檔案數量: {file_count}")
+                    else:
+                        debug_print(f"{list_area}沒有可下載的檔案")
+                else:
+                    debug_print(f"{list_area}是空白的，跳過")
 
             if not all_files:
                 debug_print("警告: 沒有找到可下載的檔案")
@@ -298,9 +274,9 @@ class FileProcessor:
             # 下載檔案
             is_first_click = True
             click_count = 0
-            downloaded_files = set()  # 記錄已下載的檔案
+            downloaded_files = set()
 
-            for file, list_index in all_files:
+            for file, area_index in all_files:
                 if should_stop_callback():
                     return
 
@@ -311,8 +287,8 @@ class FileProcessor:
 
                     debug_print(f"正在下載: {file_name}")
                     
-                    # 檢查檔案是否在可視範圍內
-                    list_area = list_areas[list_index]
+                    # 使用對應的有效列表區域
+                    list_area = valid_areas[area_index]
                     if not self.is_file_visible(file, list_area):
                         debug_print(f"檔案 '{file_name}' 不在可視範圍內，嘗試調整位置")
                         if not self.scroll_to_file(file, list_area, hwnd):
@@ -321,9 +297,10 @@ class FileProcessor:
 
                     # 執行點擊
                     rect = file.rectangle()
-                    center_x = (rect.left + rect.right) // 2
-                    center_y = (rect.top + rect.bottom) // 2
-                    
+                    center_x, center_y = calculate_center_position(rect)
+                    if center_x is None or center_y is None:
+                        debug_print("無法計算檔案位置，跳過此檔案")
+                        continue
                     MouseController.click_file(center_x, center_y, is_first_click)
                     
                     if not is_first_click:
@@ -338,7 +315,7 @@ class FileProcessor:
                     downloaded_files.add(file_name)
                     
                     # 如果是當前列表的最後一個檔案，切換到下一個列表
-                    if self.is_last_file_in_list(file, list_index, all_files):
+                    if self.is_last_file_in_list(file, area_index, all_files):
                         debug_print(f"切換到下一個列表")
                         self.navigator.switch_to_next_list(hwnd)  # 使用 navigator 來切換列表
 
@@ -377,7 +354,7 @@ class FileProcessor:
         """獲取所有檔案"""
         all_files = []
         for i in range(3):  # 三個列表
-            files = main_window.child_window(control_type="List", found_index=i).descendants(control_type="ListItem")
+            files = get_list_items(main_window, i)
             all_files.extend([(file, i) for file in files if not file.window_text().endswith("_公司")])
         return all_files
 
@@ -391,14 +368,15 @@ class FileProcessor:
             try:
                 # 在所有列表中尋找檔案
                 for i in range(3):
-                    files = main_window.child_window(control_type="List", found_index=i).descendants(control_type="ListItem")
+                    files = get_list_items(main_window, i)
                     for file in files:
                         if file.window_text() == file_name:
                             # 使用與主下載相同的邏輯
                             rect = file.rectangle()
-                            center_x = (rect.left + rect.right) // 2
-                            center_y = (rect.top + rect.bottom) // 2
-                            
+                            center_x, center_y = calculate_center_position(rect)
+                            if center_x is None or center_y is None:
+                                debug_print("無法計算檔案位置，跳過此檔案")
+                                continue
                             MouseController.click_file(center_x, center_y, False)
                             click_count += 1
                             
@@ -422,24 +400,11 @@ class FileProcessor:
             app = PywinautoApp(backend="uia").connect(handle=hwnd)
             main_window = app.window(handle=hwnd)
             
-            # 找到目標檔案所在的列表
-            lists = main_window.descendants(control_type="List")
-            current_list = None
-            for lst in lists:
-                rect = lst.rectangle()
-                if (rect.left == list_area.left and 
-                    rect.top == list_area.top and 
-                    rect.right == list_area.right and 
-                    rect.bottom == list_area.bottom):
-                    current_list = lst
-                    break
-            
-            if not current_list:
-                debug_print("找不到對應的列表")
-                return False
+            # 獲取列表區域的矩形
+            list_rect = list_area.rectangle()
             
             # 獲取當前列表的所有檔案
-            current_files = current_list.children(control_type="ListItem")
+            current_files = get_list_items(list_area)
             target_name = file.window_text()
             
             # 找到目標檔案的索引
@@ -476,9 +441,9 @@ class FileProcessor:
                     debug_print("檔案已在可視範圍內")
                     return True
                 
-                win32gui.SetForegroundWindow(hwnd)
-                time.sleep(0.2)
-                
+                if not ensure_foreground_window(hwnd):
+                    debug_print("警告: 無法確保視窗在前景")
+                    
                 if target_index < visible_index:
                     debug_print(f"目標檔案在可見區域上方，向上翻頁 (第 {attempt + 1} 次)")
                     pyautogui.press('pageup')
@@ -507,22 +472,37 @@ class MainApp:
         self.scheduler = None
         self.should_stop = False
         self.stop_event = threading.Event()
+        self.esc_thread = None  # 新增：保存 ESC 監聽線程的引用
 
     def check_esc_key(self):
         """監聽 ESC 按鍵"""
-        while True:
+        while not self.stop_event.is_set():  # 使用 Event 來控制線程
             if keyboard.is_pressed('esc'):
                 self.should_stop = True
+                self.stop_event.set()  # 設置停止事件
                 debug_print("\n[DEBUG] ESC 按鍵被按下，停止執行")
+                # 同步停止其他模組
+                set_stop()  # 停止 get_list_area
                 break
             time.sleep(0.1)
 
+    def start_esc_listener(self):
+        """啟動 ESC 監聽"""
+        if self.esc_thread is None or not self.esc_thread.is_alive():
+            self.should_stop = False
+            self.stop_event.clear()
+            self.esc_thread = threading.Thread(target=self.check_esc_key, daemon=True)
+            self.esc_thread.start()
+
+    def stop_esc_listener(self):
+        """停止 ESC 監聽"""
+        self.stop_event.set()
+        if self.esc_thread and self.esc_thread.is_alive():
+            self.esc_thread.join(timeout=1.0) # 等待1秒，確保線程結束
+
     def select_window(self, index):
-        self.should_stop = False
-        self.stop_event.clear()
-        
-        esc_thread = threading.Thread(target=self.check_esc_key, daemon=True)
-        esc_thread.start()
+        """選擇視窗"""
+        self.start_esc_listener()  # 使用新的啟動方法
         
         target_windows = find_window_handle(Config.TARGET_WINDOW)
         if 1 <= index <= len(target_windows):
@@ -533,63 +513,62 @@ class MainApp:
             self.file_processor.process_files(app, hwnd, window_title, lambda: self.should_stop)
         else:
             debug_print("無效的選擇")
-
-    def is_weekday_2_to_5(self):
-        weekday = datetime.now().weekday()
-        return 1 <= weekday <= 4
+        
+        self.stop_esc_listener()  # 操作完成後停止監聽
 
     def execute_sequence(self):
         """執行連續任務"""
-        self.should_stop = False
-        
-        # 啟動 ESC 監聽線程
-        esc_thread = threading.Thread(target=self.check_esc_key, daemon=True)
-        esc_thread.start()
+        self.start_esc_listener()  # 使用新的啟動方法
         
         debug_print("開始執行連續任務...")
         
-        # 每個步驟前都檢查是否要停止
         steps = [
             ("設定字型大小", lambda: set_font_size()),
             ("點擊今日日期", lambda: start_calendar_checker()),
             ("下載檔案", lambda: self.select_window(1)),
             ("再次點擊今日", lambda: start_calendar_checker()),
+            ("按左鍵", lambda: pyautogui.press('left')),
+            ("下載檔案", lambda: self.select_window(1)),
+            ("點擊今日", lambda: start_calendar_checker()),
+            ("按上鍵", lambda: pyautogui.press('up')),
+            ("下載檔案", lambda: self.select_window(1))
         ]
-        
-        # 如果是週二到週五，添加額外步驟
-        if self.is_weekday_2_to_5():
-            extra_steps = [
-                ("按左鍵", lambda: pyautogui.press('left')),
-                ("下載檔案", lambda: self.select_window(1)),
-                ("點擊今日", lambda: start_calendar_checker()),
-                ("按上鍵", lambda: pyautogui.press('up')),
-                ("下載檔案", lambda: self.select_window(1))
-            ]
-            steps.extend(extra_steps)
-        
-        # 執行所有步驟
+
         for i, (step_name, step_func) in enumerate(steps, 1):
             if self.should_stop:
                 debug_print("任務已停止")
-                return
+                break
             
             debug_print(f"步驟{i}: {step_name}")
             step_func()
-            time.sleep(1)  # 每個步驟之間暫停1秒
+            time.sleep(1)
         
         debug_print("連續任務執行完成")
+        self.stop_esc_listener()  # 操作完成後停止監聽
 
     def download_current_list(self):
+        """下載當前列表檔案"""
         self.should_stop = False
         self.stop_event.clear()
         
-        debug_print("開始下載當前列表檔案...")
+        debug_print("開始載當前列表檔案...")
         
-        esc_thread = threading.Thread(target=self.check_esc_key, daemon=True)
-        esc_thread.start()
+        self.start_esc_listener()  # 使用新的啟動方法
         
         MouseController.move_to_safe_position()
         self.select_window(1)
+
+    def toggle_refresh_check(self):
+        """切換列表刷新檢測"""
+        if not refresh_checking:
+            hwnd = self.selected_window[0] if self.selected_window else None
+            threading.Thread(
+                target=start_refresh_check,
+                args=(hwnd,),
+                daemon=True
+            ).start()
+        else:
+            stop_refresh_check()
 
     def run(self):
         try:
@@ -605,6 +584,7 @@ class MainApp:
             keyboard.add_hotkey('ctrl+d', self.download_current_list)
             keyboard.add_hotkey('ctrl+g', start_list_area_checker)
             keyboard.add_hotkey('ctrl+b', set_font_size)
+            keyboard.add_hotkey('ctrl+t', self.toggle_refresh_check)
             
             self.scheduler = Scheduler(self.execute_sequence)
             scheduler_thread = self.scheduler.init_scheduler()
