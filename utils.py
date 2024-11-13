@@ -128,39 +128,10 @@ def calculate_center_position(rect):
         debug_print(f"計算中心點位置時發生錯誤: {str(e)}")
         return None, None
 
-# 檢查列表是否刷新，但只能檢查出檔案數量變化
-def check_list_refresh(current_count, new_count, is_date_switching):
-    """
-    檢查列表是否發生刷新
-    current_count: 當前檔案數量
-    new_count: 新的檔案數量
-    is_date_switching: 是否正在切換日期
-    返回: (是否刷新, 新的檔案數量)
-    """
-    try:
-        if is_date_switching:
-            return False, new_count
-        
-        if current_count != 0 and new_count != current_count:
-            debug_print(f"檢測到列表刷新: 檔案數量從 {current_count} 變為 {new_count}")
-            return True, new_count
-        
-        if current_count == 0:
-            return False, new_count
-        
-        return False, current_count
-            
-    except Exception as e:
-        debug_print(f"檢查列表刷新時發生錯誤: {str(e)}")
-        return False, current_count
-
 def start_refresh_check(hwnd=None):
-    """
-    開始檢測列表刷新
-    hwnd: 視窗句柄，如果未提供則自動尋找視窗
-    """
+    """開始檢測列表刷新"""
     global refresh_checking
-    CHECK_INTERVAL = 0.3 # 檢查間隔
+    CHECK_INTERVAL = 0.3
     
     try:
         if hwnd is None:
@@ -169,12 +140,9 @@ def start_refresh_check(hwnd=None):
                 debug_print("錯誤: 找不到目標視窗")
                 return
             hwnd = windows[0][0]
-            debug_print(f"已自動選擇視窗: {windows[0][1]}")
-        
+            
         refresh_checking = True
-        # 為每個列表維護單獨的檔案集合
-        current_files = [{}, {}, {}]  # 使用字典來存儲每個列表的檔案
-        last_check_time = datetime.now()
+        current_files = [{}, {}, {}]  # 每個列表的檔案狀態
         debug_print("開始檢測列表刷新...")
         
         while refresh_checking:
@@ -182,44 +150,28 @@ def start_refresh_check(hwnd=None):
                 app = PywinautoApp(backend="uia").connect(handle=hwnd)
                 main_window = app.window(handle=hwnd)
                 
-                # 檢查每個列表
                 for i in range(3):
                     try:
                         list_control = main_window.child_window(control_type="List", found_index=i)
                         if not list_control.is_visible():
                             continue
                             
-                        # 獲取當前列表的檔案
-                        files = get_list_items(main_window, i)
-                        new_files = {}
+                        new_files = {
+                            file.window_text(): file.rectangle()
+                            for file in get_list_items(main_window, i)
+                        }
                         
-                        # 建立新的檔案字典，包含檔案名稱和位置
-                        for file in files:
-                            try:
-                                name = file.window_text()
-                                rect = file.rectangle()
-                                new_files[name] = (rect.top, rect.bottom)
-                            except:
-                                continue
-                        
-                        # 比較檔案變化
-                        if current_files[i]:  # 如果有之前的記錄
-                            # 檢查檔案位置是否變化
-                            for name, pos in new_files.items():
-                                if name in current_files[i]:
-                                    old_pos = current_files[i][name]
-                                    if old_pos != pos:  # 如果位置改變
-                                        debug_print(f"檢測到列表 {i+1} 刷新 (檔案位置變化)")
-                                        break
-                        
+                        if current_files[i] and new_files != current_files[i]:
+                            debug_print(f"檢測到列表 {i+1} 刷新")
+                            
                         current_files[i] = new_files
                             
-                    except Exception as e:
+                    except Exception:
                         continue
-                
+                        
             except Exception as e:
                 debug_print(f"檢測過程發生錯誤: {str(e)}")
-            
+                
             time.sleep(CHECK_INTERVAL)
             
     except Exception as e:
@@ -263,21 +215,25 @@ def move_to_safe_position():
     pyautogui.moveTo(screen_width // 2, screen_height // 2)
     time.sleep(SLEEP_INTERVAL)  # 使用本地定義的 SLEEP_INTERVAL
 
+def check_mouse_on_element(target_element, current_pos=None):
+    """檢查滑鼠是否在目標元素上"""
+    if not target_element:
+        return True
+        
+    if current_pos is None:
+        current_pos = pyautogui.position()
+        
+    element_rect = target_element.rectangle()
+    return (element_rect.left <= current_pos.x <= element_rect.right and 
+            element_rect.top <= current_pos.y <= element_rect.bottom)
+
 def click_at(x, y, is_first_click=False, clicks=1, interval=SLEEP_INTERVAL, sleep_interval=None, hwnd=None, window_title=None, target_element=None):
     """點擊指定位置，若滑鼠移動則暫停1秒"""
     global is_program_moving, last_mouse_pos
     
     try:
         while True:
-            if hwnd is None:
-                debug_print("警告: 未提供視窗句柄")
-                return False
-
-            if window_title is None:
-                window_title = win32gui.GetWindowText(hwnd)
-
             if not ensure_foreground_window(hwnd, window_title):
-                debug_print("警告: 無法確保視窗在前景")
                 return False
 
             # 移動滑鼠前檢查
@@ -286,61 +242,36 @@ def click_at(x, y, is_first_click=False, clicks=1, interval=SLEEP_INTERVAL, slee
                 time.sleep(1)
                 continue
                 
-            # 設定標記為程式移動
+            # 設定標記為程式移動並執行移動
             is_program_moving = True
-            
-            # 移動滑鼠
             pyautogui.moveTo(x, y)
             time.sleep(interval)
             
-            # 更新最後位置為目標位置並重設標記
-            last_mouse_pos = pyautogui.position()
+            # 更新位置並重設標記
+            current_pos = pyautogui.position()
+            last_mouse_pos = current_pos
             is_program_moving = False
             
-            # 檢查滑鼠是否在目標元素上
-            if target_element:
-                element_rect = target_element.rectangle()
-                current_pos = pyautogui.position()
-                if not (element_rect.left <= current_pos.x <= element_rect.right and 
-                       element_rect.top <= current_pos.y <= element_rect.bottom):
-                    debug_print("滑鼠未在目標元素上，重試...")
-                    continue
-            
-            # 點擊前再次檢查
-            if check_mouse_movement():
-                debug_print("檢測到滑鼠移動，暫停 1 秒")
-                time.sleep(1)
+            # 檢查滑鼠位置
+            if not check_mouse_on_element(target_element, current_pos):
+                debug_print("滑鼠未在目標元素上，重試...")
                 continue
-                
+            
             # 執行點擊
             click_completed = True
             for _ in range(clicks):
                 pyautogui.click()
                 if clicks > 1:
                     time.sleep(interval)
-                    # 檢查是否仍在目標元素上
-                    if target_element:
-                        current_pos = pyautogui.position()
-                        element_rect = target_element.rectangle()
-                        if not (element_rect.left <= current_pos.x <= element_rect.right and 
-                               element_rect.top <= current_pos.y <= element_rect.bottom):
-                            debug_print("點擊過程中滑鼠離開目標元素，重試...")
-                            click_completed = False
-                            break
-                        
-                    if check_mouse_movement():
-                        debug_print("檢測到滑鼠移動，暫停 1 秒")
-                        time.sleep(1)
+                    if not check_mouse_on_element(target_element) or check_mouse_movement():
+                        debug_print("點擊過程中檢測到問題，重試...")
                         click_completed = False
                         break
                         
             if not click_completed:
                 continue
             
-            if sleep_interval is None:
-                sleep_interval = interval * (5 if is_first_click else 1)
-            
-            time.sleep(sleep_interval)
+            time.sleep(sleep_interval or (interval * (5 if is_first_click else 1)))
             return True
             
     except Exception as e:
