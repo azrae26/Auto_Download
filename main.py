@@ -10,7 +10,7 @@ import win32con
 import threading
 from queue import Queue
 from datetime import datetime, timedelta
-from calendar_checker import start_calendar_checker
+from calendar_checker import start_calendar_checker, start_click_calendar_blank
 from get_list_area import start_list_area_checker, set_stop, list_all_controls, monitor_clicks
 from utils import debug_print, find_window_handle, ensure_foreground_window, get_list_items, calculate_center_position, refresh_checking, start_refresh_check, stop_refresh_check, click_at, move_to_safe_position, check_mouse_movement
 from scheduler import Scheduler
@@ -20,7 +20,7 @@ class Config:
     """配置類，集中管理所有配置參數"""
     RETRY_LIMIT = 8  # 向上翻頁次數
     SLEEP_INTERVAL = 0.1  # 基本等待時間為 0.1 秒
-    CLICK_BATCH_SIZE = 5  # 批次點擊次數
+    CLICK_BATCH_SIZE = 10  # 批次下載檔案數量
     MOUSE_MAX_OFFSET = 100  # 滑鼠最大偏移量
     TARGET_WINDOW = "stocks"
     PROCESS_NAME = "DOstocksBiz.exe"
@@ -549,25 +549,53 @@ class MainApp:
     def execute_sequence(self):
         """執行連續任務"""
         self.start_esc_listener()
-        
         debug_print("開始執行連續任務...")
         
         # 先獲取視窗句柄
         hwnd, window_title = self.selected_window or find_window_handle(Config.TARGET_WINDOW)[0]
         
+        def press_left_or_up(left_times, up_times):
+            """連續按左或上鍵指定次數"""
+            if left_times > 0:
+                debug_print(f"按下左鍵 {left_times} 次")
+            for _ in range(left_times):
+                pyautogui.press('left')
+                time.sleep(Config.SLEEP_INTERVAL)
+            
+            if up_times > 0:
+                debug_print(f"按下上鍵 {up_times} 次")
+            for _ in range(up_times):
+                pyautogui.press('up')
+                time.sleep(Config.SLEEP_INTERVAL)
+        
+        def download_days_weeks(days_ago, weeks_ago):
+            """下載 N 天前、或 N 週前的檔案"""
+            if days_ago > 0 or weeks_ago > 0:  # 修改條件判斷
+                press_left_or_up(days_ago, weeks_ago)
+            self.select_window(1)
+        
+        # 基本步驟
         steps = [
             ("點擊每日報告標籤", lambda: self.click_daily_report_tab(hwnd, window_title)),  # 傳入已獲取的句柄
             ("設定字型大小", lambda: set_font_size()),
-            ("點擊今日日期", lambda: start_calendar_checker()),
-            ("下載檔案", lambda: self.select_window(1)),
-            ("再次點擊今日", lambda: start_calendar_checker()),
-            ("按左鍵", lambda: pyautogui.press('left')),
-            ("下載檔案", lambda: self.select_window(1)),
-            ("點擊今日", lambda: start_calendar_checker()),
-            ("按上鍵", lambda: pyautogui.press('up')),
-            ("下載檔案", lambda: self.select_window(1))
-        ]
+            ("下載今日檔案", lambda: download_days_weeks(0, 0)),  # 下載今日檔案
+            ("點擊今日", lambda: start_calendar_checker(0)),
+            ("下載昨日檔案", lambda: download_days_weeks(1, 0)),  # 下載昨日檔案
 
+            ("點擊今日", lambda: start_calendar_checker(0)),
+            ("下載上週檔案", lambda: download_days_weeks(0, 1)),  # 下載上週檔案
+            ("點擊日歷空白處", lambda: start_click_calendar_blank()),
+            ("下載上週檔案", lambda: download_days_weeks(0, 1)),  # 下載上週檔案
+            ("點擊日歷空白處", lambda: start_click_calendar_blank()),
+            ("下載上週檔案", lambda: download_days_weeks(0, 1)),  # 下載上週檔案
+            ("點擊日歷空白處", lambda: start_click_calendar_blank()),
+            ("下載上週檔案", lambda: download_days_weeks(0, 1)),  # 下載上週檔案
+            
+            ("點擊日歷空白處", lambda: start_click_calendar_blank()),
+            ("鍵盤向下X4", lambda: [pyautogui.press('down') for _ in range(4)]),
+        ]
+        
+        # 執行所有步驟
         for i, (step_name, step_func) in enumerate(steps, 1):
             if self.should_stop:
                 debug_print("任務已停止")
@@ -607,22 +635,22 @@ class MainApp:
     def run(self):
         try:
             debug_print("=== 研究報告自動下載程式 ===")
-            """""
-            keyboard.add_hotkey('ctrl+e', self.execute_sequence)
-            keyboard.add_hotkey('ctrl+d', self.download_current_list)
-            keyboard.add_hotkey('ctrl+g', start_list_area_checker)
-            keyboard.add_hotkey('ctrl+b', set_font_size)
-            keyboard.add_hotkey('ctrl+t', self.toggle_refresh_check)
-            keyboard.add_hotkey('ctrl+r', list_all_controls)
-            keyboard.add_hotkey('ctrl+m', monitor_clicks)
-            debug_print("按下 CTRL+E 開始連續下載任務")
-            debug_print("按下 CTRL+D 下載當前列表檔案")
-            debug_print("按下 CTRL+G 檢測檔案列表區域")
-            debug_print("按下 CTRL+B 設定字型大小")
-            debug_print("按下 CTRL+T 切換列表刷新檢測")
-            debug_print("按下 CTRL+R 列出所有控件")
-            debug_print("按下 CTRL+M 開始監控滑鼠點擊")
-            """""
+            
+            keyboard.add_hotkey('ctrl+shift+e', self.execute_sequence)
+            keyboard.add_hotkey('ctrl+shift+d', self.download_current_list)
+            keyboard.add_hotkey('ctrl+shift+g', start_list_area_checker)
+            keyboard.add_hotkey('ctrl+shift+b', set_font_size)
+            keyboard.add_hotkey('ctrl+shift+t', self.toggle_refresh_check)
+            keyboard.add_hotkey('ctrl+shift+r', list_all_controls)
+            keyboard.add_hotkey('ctrl+shift+m', monitor_clicks)
+            debug_print("按下 CTRL+SHIFT+E 開始連續下載任務")
+            debug_print("按下 CTRL+SHIFT+D 下載當前列表檔案")
+            debug_print("按下 CTRL+SHIFT+G 檢測檔案列表區域")
+            debug_print("按下 CTRL+SHIFT+B 設定字型大小")
+            debug_print("按下 CTRL+SHIFT+T 切換列表刷新檢測")
+            debug_print("按下 CTRL+SHIFT+R 列出所有控件")
+            debug_print("按下 CTRL+SHIFT+M 開始監控滑鼠點擊")
+            
             debug_print("按下 ESC 停止下載")
             debug_print("按下 CTRL+SHIFT+Q 關閉程式")
             self.scheduler = Scheduler(self.execute_sequence)
