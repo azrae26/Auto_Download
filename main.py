@@ -115,19 +115,39 @@ class ListNavigator:
         self.up_retry_count = 0
 
     def switch_to_next_list(self, hwnd):
+        """切換到下一個列表"""
         debug_print("開始切換列表: 點擊左鍵")
-        pyautogui.click()
-        time.sleep(Config.SLEEP_INTERVAL * 5)
         
-        debug_print(f"按下 {Config.TAB_SWITCH_COUNT} 次 TAB 切換列表")
-        for _ in range(Config.TAB_SWITCH_COUNT):
-            pyautogui.press('tab')
-            time.sleep(Config.SLEEP_INTERVAL * 2)
-        time.sleep(Config.SLEEP_INTERVAL * 5)
+        try:
+            # 連接到視窗
+            app = PywinautoApp(backend="uia").connect(handle=hwnd)
+            main_window = app.window(handle=hwnd)
+            
+            # 獲取當前列表區域
+            lists = main_window.descendants(control_type="List")
+            if len(lists) >= 2:  # 確保至少有兩個列表
+                # 獲取下一個列表的位置
+                next_list = lists[1]  # 從左側列表切換到中間列表
+                rect = next_list.rectangle()
+                
+                # 計算點擊位置（列表頂部往下 10px 的位置）
+                click_x = (rect.left + rect.right) // 2
+                click_y = rect.top + 10
+                
+                # 移動到位置並點擊
+                pyautogui.moveTo(click_x, int(click_y))
+                time.sleep(Config.SLEEP_INTERVAL * 2)
+                pyautogui.click()
+                time.sleep(Config.SLEEP_INTERVAL * 2)
+                
+                debug_print(f"已點擊下一個列表位置: x={click_x}, y={int(click_y)}")
+                
+            else:
+                debug_print("警告: 找不到足夠的列表區域")
+            
+        except Exception as e:
+            debug_print(f"切換列表時發生錯誤: {str(e)}")
         
-        self.searching_up = True
-        self.down_retry_count = Config.RETRY_LIMIT
-        self.up_retry_count = 0
         self.after_tab_switch = True
 
     def navigate_to_file(self, file, main_list_area, hwnd, file_name):
@@ -181,6 +201,8 @@ class FileProcessor:
         self.current_file_count = 0
         self.last_known_position = 0
         self.is_date_switching = False
+        self.should_stop = False
+        self.navigator = ListNavigator()  # 添加 ListNavigator 實例
         pyautogui.FAILSAFE = False
 
     @staticmethod
@@ -262,147 +284,235 @@ class FileProcessor:
                 debug_print("[DEBUG] 下載開始前檢測到停止信號")
                 return
 
-            if not WindowHandler.is_process_running(Config.PROCESS_NAME):
-                debug_print(f"錯誤: {Config.PROCESS_NAME} 未運行，請先開啟程式")
-                return
-
             if not WindowHandler.ensure_window_visible(hwnd, window_title):
                 debug_print("錯誤: 無法確保視窗可見")
                 return
 
             main_window = app.window(handle=hwnd)
-            files = main_window.descendants(control_type="ListItem")
             
-            if not files:
-                debug_print("警告: 沒有找到可下載的檔案")
-                return
-
-            debug_print(f"找到 {len(files)} 個檔案")
-            
-            last_click_x = None
-            last_click_y = None
-            is_first_click = True
-            click_count = 0
-            
+            # 獲取所有列表區域
             list_areas = start_list_area_checker()
             if not list_areas or len(list_areas) < 3:
                 debug_print("警告: 無法獲取完整的列表區域資訊")
                 return
 
-            main_list_area = list_areas[1]
-            current_list_items = main_window.descendants(control_type="ListItem")
+            # 獲取每個列表區域的檔案
+            all_files = []
+            for i, list_area in enumerate(['左側列表', '中間列表', '右側列表']):
+                debug_print(f"獲取{list_area}檔案...")
+                files = main_window.child_window(control_type="List", found_index=i).descendants(control_type="ListItem")
+                all_files.extend([(file, i) for file in files if not file.window_text().endswith("_公司")])
+                debug_print(f"{list_area}檔案數量: {len(files)}")
+
+            if not all_files:
+                debug_print("警告: 沒有找到可下載的檔案")
+                return
+
+            debug_print(f"總共找到 {len(all_files)} 個可下載檔案")
             
-            navigator = ListNavigator()
-            
-            i = self.last_known_position
-            while i < len(files):
+            # 下載檔案
+            is_first_click = True
+            click_count = 0
+            downloaded_files = set()  # 記錄已下載的檔案
+
+            for file, list_index in all_files:
                 if should_stop_callback():
                     return
-                
+
                 try:
-                    if self.handle_refresh(files, i, last_click_x, last_click_y):
-                        files = main_window.descendants(control_type="ListItem")
-                        if self.last_known_position >= len(files):
-                            self.last_known_position = max(0, len(files) - 1)
-                        if self.last_known_position > 0:
-                            debug_print(f"嘗試恢復到位置 {self.last_known_position}")
-                            pages_needed = self.last_known_position // Config.PAGE_SIZE
-                            for _ in range(pages_needed):
-                                pyautogui.press('pagedown')
-                                time.sleep(Config.SLEEP_INTERVAL)
-                            try:
-                                current_file = files[i]
-                                rect = current_file.rectangle()
-                                center_x = (rect.left + rect.right) // 2
-                                center_y = (rect.top + rect.bottom) // 2
-                                pyautogui.moveTo(center_x, center_y)
-                                time.sleep(Config.SLEEP_INTERVAL * 2)
-                            except Exception as e:
-                                debug_print(f"恢復滑鼠位置時發生錯誤: {str(e)}")
-                        continue
-                    
-                    if not WindowHandler.ensure_window_visible(hwnd, window_title):
-                        debug_print("警告: 無法確保視窗可見，重試當前檔案")
-                        continue
-                    
-                    file = files[i]
                     file_name = file.window_text()
-                    
-                    if not navigator.navigate_to_file(file, main_list_area, hwnd, file_name):
+                    if file_name in downloaded_files:
                         continue
+
+                    debug_print(f"正在下載: {file_name}")
                     
-                    navigator.after_tab_switch = False
-                    
-                    if file_name.endswith("_公司"):
-                        debug_print(f"跳過檔案 ({i+1}/{len(files)}): {file_name} (檔名以_公司結尾)")
-                        i += 1
-                        continue
-                    
+                    # 檢查檔案是否在可視範圍內
+                    list_area = list_areas[list_index]
+                    if not self.is_file_visible(file, list_area):
+                        debug_print(f"檔案 '{file_name}' 不在可視範圍內，嘗試調整位置")
+                        if not self.scroll_to_file(file, list_area, hwnd):
+                            debug_print(f"無法使檔案 '{file_name}' 進入可視範圍，跳過")
+                            continue
+
+                    # 執行點擊
                     rect = file.rectangle()
                     center_x = (rect.left + rect.right) // 2
                     center_y = (rect.top + rect.bottom) // 2
                     
-                    current_mouse_x, current_mouse_y = pyautogui.position()
-                    if not MouseController.is_position_safe(current_mouse_x, current_mouse_y, last_click_x, last_click_y):
-                        debug_print("檢測到滑鼠偏移過大")
-                        debug_print("暫停下載...")
-                        time.sleep(Config.SLEEP_INTERVAL * 5)
-                        debug_print(f"重新定位到當前檔案: {file_name}")
-                        MouseController.move_to_safe_position()
-                        pyautogui.moveTo(center_x, center_y)
-                        time.sleep(Config.SLEEP_INTERVAL * 2)
-                        debug_print("繼續下載...")
-                        continue
-                    
-                    debug_print(f"正在下載 ({i+1}/{len(files)}): {file_name}")
-                    
-                    if should_stop_callback():
-                        return
-                    
                     MouseController.click_file(center_x, center_y, is_first_click)
-                    last_click_x = center_x
-                    last_click_y = center_y
                     
                     if not is_first_click:
                         click_count += 1
                         if click_count == Config.CLICK_BATCH_SIZE:
-                            time.sleep(Config.SLEEP_INTERVAL * 3)
                             self.close_windows(Config.CLICK_BATCH_SIZE)
                             click_count = 0
                     else:
                         is_first_click = False
                         time.sleep(Config.SLEEP_INTERVAL * 5)
 
-                    time.sleep(Config.SLEEP_INTERVAL)
+                    downloaded_files.add(file_name)
                     
-                    if self.is_last_file_in_current_list(file, current_list_items):
-                        debug_print(f"檔案 '{file_name}' 是當前列表的最後一個檔案，準備切換到下一個列表")
-                        win32gui.SetForegroundWindow(hwnd)
-                        time.sleep(Config.SLEEP_INTERVAL * 2)
-                        navigator.switch_to_next_list(hwnd)
-                        # 切換列表後更新當前列表項目
-                        current_list_items = main_window.descendants(control_type="ListItem")
-                    
-                    i += 1
-                    self.last_known_position = i
-                    
+                    # 如果是當前列表的最後一個檔案，切換到下�����列表
+                    if self.is_last_file_in_list(file, list_index, all_files):
+                        debug_print(f"切換到下一個列表")
+                        self.navigator.switch_to_next_list(hwnd)  # 使用 navigator 來切換列表
+
                 except Exception as e:
-                    debug_print(f"下載檔案時發生錯誤: {str(e)}")
-                    i += 1
+                    debug_print(f"處理檔案時發生錯誤: {str(e)}")
                     continue
-            
+
+            # 關閉剩餘視窗
             if click_count > 0:
                 self.close_windows(click_count)
+
+            # 檢查是否有漏掉的檔案
+            debug_print("檢查是否有漏掉的檔案...")
+            new_files = set(file.window_text() for file, _ in self.get_all_files(main_window))
+            missed_files = new_files - downloaded_files
             
+            if missed_files:
+                debug_print(f"發現 {len(missed_files)} 個漏掉的檔案，開始下載...")
+                # 下載漏掉的檔案
+                self.download_missed_files(missed_files, main_window, hwnd)
+
             debug_print("所有檔案下載完成")
-            self.last_known_position = 0
-            
+
         except Exception as e:
             debug_print(f"發生錯誤: {str(e)}")
-            debug_print("\n請確保:")
-            debug_print(f"1. {Config.PROCESS_NAME} 已經開啟")
-            debug_print("2. 視窗未最小化")
-            debug_print("3. 已選擇正確的視窗")
+
+    def is_last_file_in_list(self, current_file, list_index, all_files):
+        """判斷是否為當前列表的最後一個檔案"""
+        current_index = all_files.index((current_file, list_index))
+        if current_index + 1 >= len(all_files):
+            return True
+        next_file, next_list_index = all_files[current_index + 1]
+        return next_list_index != list_index
+
+    def get_all_files(self, main_window):
+        """獲取所有檔案"""
+        all_files = []
+        for i in range(3):  # 三個列表
+            files = main_window.child_window(control_type="List", found_index=i).descendants(control_type="ListItem")
+            all_files.extend([(file, i) for file in files if not file.window_text().endswith("_公司")])
+        return all_files
+
+    def download_missed_files(self, missed_files, main_window, hwnd):
+        """下載漏掉的檔案"""
+        click_count = 0
+        for file_name in missed_files:
+            if self.should_stop:
+                return
+                
+            try:
+                # 在所有列表中尋找檔案
+                for i in range(3):
+                    files = main_window.child_window(control_type="List", found_index=i).descendants(control_type="ListItem")
+                    for file in files:
+                        if file.window_text() == file_name:
+                            # 使用與主下載相同的邏輯
+                            rect = file.rectangle()
+                            center_x = (rect.left + rect.right) // 2
+                            center_y = (rect.top + rect.bottom) // 2
+                            
+                            MouseController.click_file(center_x, center_y, False)
+                            click_count += 1
+                            
+                            if click_count == Config.CLICK_BATCH_SIZE:
+                                self.close_windows(Config.CLICK_BATCH_SIZE)
+                                click_count = 0
+                            
+                            break
+            except Exception as e:
+                debug_print(f"下載漏掉的檔案時發生錯誤: {str(e)}")
+                continue
+        
+        # 關閉剩餘視窗
+        if click_count > 0:
+            self.close_windows(click_count)
+
+    def scroll_to_file(self, file, list_area, hwnd):
+        """滾動直到檔案進入可視範圍"""
+        try:
+            # 連接到視窗
+            app = PywinautoApp(backend="uia").connect(handle=hwnd)
+            main_window = app.window(handle=hwnd)
+            
+            # 找到目標檔案所在的列表
+            lists = main_window.descendants(control_type="List")
+            current_list = None
+            for lst in lists:
+                rect = lst.rectangle()
+                if (rect.left == list_area.left and 
+                    rect.top == list_area.top and 
+                    rect.right == list_area.right and 
+                    rect.bottom == list_area.bottom):
+                    current_list = lst
+                    break
+            
+            if not current_list:
+                debug_print("找不到對應的列表")
+                return False
+            
+            # 獲取當前列表的所有檔案
+            current_files = current_list.children(control_type="ListItem")
+            target_name = file.window_text()
+            
+            # 找到目標檔案的索引
+            target_index = -1
+            for i, f in enumerate(current_files):
+                if f.window_text() == target_name:
+                    target_index = i
+                    break
+            
+            if target_index == -1:
+                debug_print(f"在列表中找不到檔案: {target_name}")
+                return False
+            
+            # 找到當前可見的第一個檔案的索引
+            visible_index = -1
+            for i, f in enumerate(current_files):
+                if self.is_file_visible(f, list_area):
+                    visible_index = i
+                    debug_print(f"當前可見的第一個檔案索引: {i}")
+                    debug_print(f"檔案名稱: {f.window_text()}")
+                    break
+            
+            if visible_index == -1:
+                debug_print("找不到可見的檔案")
+                return False
+            
+            debug_print(f"目標檔案索引: {target_index}")
+            debug_print(f"可見檔案索引: {visible_index}")
+            
+            # 根據索引決定滾動方向
+            max_attempts = 8
+            for attempt in range(max_attempts):
+                if self.is_file_visible(file, list_area):
+                    debug_print("檔案已在可視範圍內")
+                    return True
+                
+                win32gui.SetForegroundWindow(hwnd)
+                time.sleep(0.2)
+                
+                if target_index < visible_index:
+                    debug_print(f"目標檔案在可見區域上方，向上翻頁 (第 {attempt + 1} 次)")
+                    pyautogui.press('pageup')
+                else:
+                    debug_print(f"目標檔案在可見區域下方，向下翻頁 (第 {attempt + 1} 次)")
+                    pyautogui.press('pagedown')
+                time.sleep(0.5)
+                
+                # 更新可見檔案的索引
+                for i, f in enumerate(current_files):
+                    if self.is_file_visible(f, list_area):
+                        visible_index = i
+                        break
+            
+            return False
+                
+        except Exception as e:
+            debug_print(f"滾動到檔案位置時發生錯誤: {str(e)}")
+            return False
 
 class MainApp:
     """主應用程序類"""
