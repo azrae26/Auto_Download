@@ -4,6 +4,7 @@ import win32gui
 import win32con
 import time
 from pywinauto.application import Application as PywinautoApp
+import win32api
 
 debug_queue = Queue()
 refresh_checking = False  # 用於控制刷新檢測的開關
@@ -50,18 +51,34 @@ def ensure_foreground_window(hwnd, window_title=None, sleep_time=0.2):
             win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
             time.sleep(sleep_time)
         
+        # 獲取當前前景視窗
+        current_hwnd = win32gui.GetForegroundWindow()
+        
+        # 如果已經是前景視窗，直接返回
+        if current_hwnd == hwnd:
+            return True
+            
         # 嘗試將視窗帶到前景
         try:
+            # 先激活視窗
+            win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
+            time.sleep(sleep_time)
+            
+            # 模擬 Alt 鍵按下和釋放，這可以幫助切換視窗焦點
+            win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)  # Alt 按下
             win32gui.SetForegroundWindow(hwnd)
+            win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)  # Alt 釋放
+            
             time.sleep(sleep_time)
             return True
+            
         except Exception as e:
             debug_print(f"警告: 無法將視窗帶到前景: {str(e)}")
             return False
             
     except Exception as e:
         debug_print(f"確保視窗可見時發生錯誤: {str(e)}")
-        return False 
+        return False
 
 def get_list_items(main_window, list_index=None):
     """獲取列表項目"""

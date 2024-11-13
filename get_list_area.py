@@ -1,4 +1,6 @@
 import win32gui
+import win32api
+import win32con
 from pywinauto.application import Application as PywinautoApp
 from datetime import datetime
 import time
@@ -153,5 +155,109 @@ def start_list_area_checker():
         debug_print(f"檢查列表區域時發生錯誤: {str(e)}")
         return None
 
+def list_all_controls():
+    """列出所有控件"""
+    try:
+        debug_print("\n開始列出所有控件:")
+        
+        # 獲取目標視窗
+        target_windows = find_window_handle(TARGET_WINDOW)
+        if not target_windows:
+            debug_print("找不到目標視窗")
+            return
+            
+        hwnd = target_windows[0][0]
+        app = PywinautoApp(backend="uia").connect(handle=hwnd)
+        main_window = app.window(handle=hwnd)
+        
+        # 獲取所有控件
+        all_controls = main_window.descendants()
+        
+        # 顯示所有控件的資訊
+        for i, control in enumerate(all_controls, 1):
+            try:
+                debug_print(f"\n控件 {i}:")
+                debug_print(f"類型: {control.element_info.control_type}, 類別: {type(control).__name__}")
+                debug_print(f"名稱: {control.window_text()}")
+                rect = control.rectangle()
+                debug_print(f"位置: 左={rect.left}, 上={rect.top}, 右={rect.right}, 下={rect.bottom}")
+                debug_print(f"寬度: {rect.width()}, 高度: {rect.height()}")
+                debug_print(f"自動化ID: {control.automation_id()}")
+                debug_print(f"類別名稱: {control.class_name()}")
+                debug_print(f"可見: {control.is_visible()}")
+            except Exception as e:
+                debug_print(f"獲取控件 {i} 資訊時發生錯誤: {str(e)}")
+                continue
+        
+        debug_print(f"\n總共找到 {len(all_controls)} 個控件")
+        
+    except Exception as e:
+        debug_print(f"列出控件時發生錯誤: {str(e)}")
+
+def get_control_at_position(x, y, hwnd):
+    """獲取指定位置的控件資訊"""
+    try:
+        app = PywinautoApp(backend="uia").connect(handle=hwnd)
+        main_window = app.window(handle=hwnd)
+        
+        # 獲取所有控件
+        all_controls = main_window.descendants()
+        
+        # 檢查每個控件
+        for control in all_controls:
+            try:
+                rect = control.rectangle()
+                if (rect.left <= x <= rect.right and 
+                    rect.top <= y <= rect.bottom):
+                    # 找到包含點擊位置的控件
+                    debug_print("\n點擊的控件資訊:")
+                    debug_print(f"類型: {control.element_info.control_type}, 類別: {type(control).__name__}")
+                    debug_print(f"名稱: {control.window_text()}")
+                    debug_print(f"位置: 左={rect.left}, 上={rect.top}, 右={rect.right}, 下={rect.bottom}")
+                    debug_print(f"寬度: {rect.width()}, 高度: {rect.height()}")
+                    debug_print(f"自動化ID: {control.automation_id()}")
+                    debug_print(f"類別名稱: {control.class_name()}")
+                    debug_print(f"可見: {control.is_visible()}")
+                    debug_print("---")
+            except Exception as e:
+                continue
+                
+    except Exception as e:
+        debug_print(f"獲取控件資訊時發生錯誤: {str(e)}")
+
+def monitor_clicks():
+    """監控滑鼠點擊"""
+    try:
+        debug_print("開始監控滑鼠點擊...")
+        debug_print("按 ESC 停止監控")
+        
+        # 獲取目標視窗
+        target_windows = find_window_handle(TARGET_WINDOW)
+        if not target_windows:
+            debug_print("找不到目標視窗")
+            return
+            
+        hwnd = target_windows[0][0]
+        
+        while not check_stop():
+            # 檢查滑鼠左鍵是否被按下
+            if win32api.GetAsyncKeyState(win32con.VK_LBUTTON) & 1:
+                # 獲取滑鼠位置
+                x, y = win32api.GetCursorPos()
+                # 獲取該位置的控件資訊
+                get_control_at_position(x, y, hwnd)
+                time.sleep(0.1)  # 避免重複觸發
+                
+            # 檢查 ESC 鍵
+            if win32api.GetAsyncKeyState(win32con.VK_ESCAPE):
+                debug_print("停止監控滑鼠點擊")
+                break
+                
+            time.sleep(0.1)
+            
+    except Exception as e:
+        debug_print(f"監控滑鼠點擊時發生錯誤: {str(e)}")
+
 if __name__ == "__main__":
     start_list_area_checker()
+    monitor_clicks()

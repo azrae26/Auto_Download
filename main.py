@@ -11,7 +11,7 @@ import threading
 from queue import Queue
 from datetime import datetime, timedelta
 from calendar_checker import start_calendar_checker
-from get_list_area import start_list_area_checker, set_stop
+from get_list_area import start_list_area_checker, set_stop, list_all_controls, monitor_clicks
 from utils import debug_print, find_window_handle, ensure_foreground_window, get_list_items, calculate_center_position, refresh_checking, start_refresh_check, stop_refresh_check
 from scheduler import Scheduler
 from font_size_setter import set_font_size
@@ -19,7 +19,7 @@ from font_size_setter import set_font_size
 class Config:
     """配置類，集中管理所有配置參數"""
     RETRY_LIMIT = 8  # 向上翻頁次數
-    SLEEP_INTERVAL = 0.1  # 等待時間
+    SLEEP_INTERVAL = 0.1  # 基本等待時間為 0.1 秒
     CLICK_BATCH_SIZE = 5  # 批次點擊次數
     MOUSE_MAX_OFFSET = 100  # 滑鼠最大偏移量
     TARGET_WINDOW = "stocks"
@@ -33,6 +33,7 @@ class WindowHandler:
     """處理窗口相關操作"""
     @staticmethod
     def is_process_running(process_name):
+        """檢查程序是否正在運行"""
         for proc in psutil.process_iter(['name']):
             try:
                 if proc.info['name'].lower() == process_name.lower():
@@ -43,29 +44,103 @@ class WindowHandler:
 
 class MouseController:
     """處理滑鼠相關操作"""
+    last_mouse_pos = None  # 儲存上一次滑鼠位置
+    is_program_moving = False  # 標記是否為程式移動滑鼠
+    
+    @staticmethod
+    def check_mouse_movement():
+        """檢查滑鼠是否移動"""
+        # 如果是程式移動滑鼠，則不檢測
+        if MouseController.is_program_moving:
+            return False
+            
+        current_pos = pyautogui.position()
+        
+        if MouseController.last_mouse_pos is None:
+            MouseController.last_mouse_pos = current_pos
+            return False
+            
+        # 檢查是否移動超過 3 像素
+        has_moved = (abs(current_pos.x - MouseController.last_mouse_pos.x) >= 3 or 
+                    abs(current_pos.y - MouseController.last_mouse_pos.y) >= 3)
+        
+        # 只有在非程式移動且確實檢測到移動時才更新位置
+        if has_moved and not MouseController.is_program_moving:
+            MouseController.last_mouse_pos = current_pos
+            
+        return has_moved
+
     @staticmethod
     def move_to_safe_position():
+        """移動到安全位置"""
         screen_width, screen_height = pyautogui.size()
         pyautogui.moveTo(screen_width // 2, screen_height // 2)
         time.sleep(Config.SLEEP_INTERVAL)
 
     @staticmethod
-    def is_position_safe(current_x, current_y, last_x, last_y):
-        if last_x is None or last_y is None:
-            return True
-        offset_x = abs(current_x - last_x)
-        offset_y = abs(current_y - last_y)
-        return offset_x <= Config.MOUSE_MAX_OFFSET and offset_y <= Config.MOUSE_MAX_OFFSET
+    def click_at(x, y, is_first_click=False, clicks=1, interval=Config.SLEEP_INTERVAL, sleep_interval=None, hwnd=None, window_title=None):
+        """點擊指定位置，若滑鼠移動則暫停1秒"""
+        try:
+            while True:
+                if hwnd is None:
+                    debug_print("警告: 未提供視窗句柄")
+                    return False
 
-    @staticmethod
-    def click_file(center_x, center_y, is_first_click=False):
-        pyautogui.moveTo(center_x, center_y)
-        time.sleep(Config.SLEEP_INTERVAL)
-        pyautogui.doubleClick()
-        if not is_first_click:
-            time.sleep(Config.SLEEP_INTERVAL * 2)
-        else:
-            time.sleep(Config.SLEEP_INTERVAL * 5)
+                if window_title is None:
+                    window_title = win32gui.GetWindowText(hwnd)
+
+                if not ensure_foreground_window(hwnd, window_title):
+                    debug_print("警告: 無法確保視窗在前景")
+                    return False
+
+                # 移動滑鼠前檢查
+                if MouseController.check_mouse_movement():
+                    debug_print("檢測到滑鼠移動，暫停 1 秒")
+                    time.sleep(1)
+                    continue
+                    
+                # 設定標記為程式移動
+                MouseController.is_program_moving = True
+                
+                # 移動滑鼠
+                pyautogui.moveTo(x, y)
+                time.sleep(Config.SLEEP_INTERVAL)
+                
+                # 更新最後位置為目標位置並重設標記
+                MouseController.last_mouse_pos = pyautogui.position()  # 使用 position() 獲取當前位置
+                MouseController.is_program_moving = False
+                
+                # 點擊前再次檢查
+                if MouseController.check_mouse_movement():
+                    debug_print("檢測到滑鼠移動，暫停 1 秒")
+                    time.sleep(1)
+                    continue
+                    
+                # 執行點擊
+                click_completed = True
+                for _ in range(clicks):
+                    pyautogui.click()
+                    if clicks > 1:
+                        time.sleep(Config.SLEEP_INTERVAL)
+                        if MouseController.check_mouse_movement():
+                            debug_print("檢測到滑鼠移動，暫停 1 秒")
+                            time.sleep(1)
+                            click_completed = False
+                            break
+                            
+                if not click_completed:
+                    continue
+                
+                if sleep_interval is None:
+                    sleep_interval = Config.SLEEP_INTERVAL * (5 if is_first_click else 1)
+                
+                time.sleep(sleep_interval)
+                return True
+                
+        except Exception as e:
+            MouseController.is_program_moving = False
+            debug_print(f"點擊操作時發生錯誤: {str(e)}")
+            return False
 
 class ListNavigator:
     """處理列表導航相關操作"""
@@ -104,9 +179,7 @@ class ListNavigator:
                 click_y = rect.top + 10
                 
                 # 移動到位置並點擊
-                pyautogui.moveTo(center_x, click_y)
-                time.sleep(Config.SLEEP_INTERVAL * 2)
-                pyautogui.click()
+                MouseController.click_at(center_x, click_y, clicks=1, hwnd=hwnd, window_title=win32gui.GetWindowText(hwnd))
                 time.sleep(Config.SLEEP_INTERVAL * 2)
                 
                 debug_print(f"已點擊下一個列表位置: x={center_x}, y={click_y}")
@@ -179,10 +252,11 @@ class FileProcessor:
     def is_file_visible(file, list_area):
         """檢查檔案是否在可視範圍內"""
         try:
-            file_rect = file.rectangle()
+            file_rect = file.rectangle() # 獲取檔案的矩形
             list_rect = list_area.rectangle()  # 獲取列表區域的矩形
-            file_center_y = (file_rect.top + file_rect.bottom) // 2
-            return (file_center_y >= list_rect.top and file_center_y <= list_rect.bottom)
+            # file_rect.top >= list_rect.top 檢查檔案頂部是否在列表區域的上方
+            # file_rect.bottom <= list_rect.bottom 檢查檔案底部是否在列表區域的下方
+            return (file_rect.top >= list_rect.top and file_rect.bottom <= list_rect.bottom) # 檢查檔案是否在列表區域的可視範圍內
         except Exception as e:
             debug_print(f"檢查檔案可見性時發生錯誤: {str(e)}")
             return False
@@ -209,18 +283,18 @@ class FileProcessor:
         try:
             # 按下 CTRL
             keyboard.press('ctrl')
-            time.sleep(0.2)  # 等待 0.2秒 確保 CTRL 被按下
+            time.sleep(Config.SLEEP_INTERVAL)  # 等待 0.1 秒 確保 CTRL 被按下
             
             # 按指定次數的 W
             for _ in range(count):
                 keyboard.press('w')
-                time.sleep(0.1)  # 間隔 0.1秒
+                time.sleep(Config.SLEEP_INTERVAL)  # 間隔 0.1秒
                 keyboard.release('w')
-                time.sleep(0.1)  # 間隔 0.1秒
+                time.sleep(Config.SLEEP_INTERVAL)  # 間隔 0.1秒
             
             # 釋放 CTRL
             keyboard.release('ctrl')
-            time.sleep(0.1)  # 等待 0.1秒 所有視窗關閉
+            time.sleep(Config.SLEEP_INTERVAL)  # 等待 0.1秒 所有視窗關閉
             
         except Exception as e:
             debug_print(f"關閉視窗時發生錯誤: {str(e)}")
@@ -256,10 +330,11 @@ class FileProcessor:
                 if files:  # 只處理有檔案的列表
                     file_count = len([f for f in files if not f.window_text().endswith("_公司")])
                     if file_count > 0:  # 確保有可下載的檔案
-                        valid_files = [(file, len(valid_areas)) for file in files if not file.window_text().endswith("_公司")]
+                        valid_files = [
+                            (file, len(valid_areas)) for file in files if not file.window_text().endswith("_公司")]
                         all_files.extend(valid_files)
                         valid_areas.append(list_areas[i])  # 儲存有效的列表區域
-                        debug_print(f"{list_area}檔案數量: {file_count}")
+                        debug_print(f"{list_area}案數量: {file_count}")
                     else:
                         debug_print(f"{list_area}沒有可下載的檔案")
                 else:
@@ -301,8 +376,11 @@ class FileProcessor:
                     if center_x is None or center_y is None:
                         debug_print("無法計算檔案位置，跳過此檔案")
                         continue
-                    MouseController.click_file(center_x, center_y, is_first_click)
+                    MouseController.click_at(center_x, center_y, clicks=2, interval=Config.SLEEP_INTERVAL * 0.5, 
+                                             is_first_click=is_first_click, hwnd=hwnd, 
+                                             window_title=window_title)
                     
+                    # 如果按下 CTRL+B 設定字型大小，則不計算點擊次數
                     if not is_first_click:
                         click_count += 1
                         if click_count == Config.CLICK_BATCH_SIZE:
@@ -377,7 +455,15 @@ class FileProcessor:
                             if center_x is None or center_y is None:
                                 debug_print("無法計算檔案位置，跳過此檔案")
                                 continue
-                            MouseController.click_file(center_x, center_y, False)
+                            MouseController.click_at(
+                                x=center_x, 
+                                y=center_y, 
+                                is_first_click=False,
+                                clicks=2,
+                                interval=Config.SLEEP_INTERVAL,
+                                hwnd=hwnd,
+                                window_title=win32gui.GetWindowText(hwnd)
+                            )
                             click_count += 1
                             
                             if click_count == Config.CLICK_BATCH_SIZE:
@@ -516,13 +602,54 @@ class MainApp:
         
         self.stop_esc_listener()  # 操作完成後停止監聽
 
+    def click_daily_report_tab(self, hwnd=None, window_title=None):
+        """點擊每日報告標籤"""
+        try:
+            # 如果沒有提供視窗句柄，則獲取
+            if hwnd is None or window_title is None:
+                hwnd, window_title = self.selected_window or find_window_handle(Config.TARGET_WINDOW)[0]
+            
+            # 確保視窗在前景
+            if not ensure_foreground_window(hwnd, window_title):
+                debug_print("警告: 無法確保視窗前景")
+                return False
+                
+            # 連接到視窗
+            app = PywinautoApp(backend="uia").connect(handle=hwnd)
+            main_window = app.window(handle=hwnd)
+            
+            # 找到每日報告標籤
+            daily_report_tab = main_window.child_window(title="每日報告", control_type="TabItem")
+            
+            # 獲取位置
+            rect = daily_report_tab.rectangle() # 獲取矩形
+            center_x, center_y = calculate_center_position(rect) # 計算中心位置
+            
+            if center_x and center_y:
+                # 雙擊
+                MouseController.click_at(center_x, center_y, clicks=2, interval=Config.SLEEP_INTERVAL, 
+                                          hwnd=hwnd, window_title=window_title)
+                debug_print("已點擊每日報告標籤")
+                return True
+            else:
+                debug_print("無法獲取每日報告標籤位置")
+                return False
+                
+        except Exception as e:
+            debug_print(f"點擊每日報告標籤時發生錯誤: {str(e)}")
+            return False
+
     def execute_sequence(self):
         """執行連續任務"""
-        self.start_esc_listener()  # 使用新的啟動方法
+        self.start_esc_listener()
         
         debug_print("開始執行連續任務...")
         
+        # 先獲取視窗句柄
+        hwnd, window_title = self.selected_window or find_window_handle(Config.TARGET_WINDOW)[0]
+        
         steps = [
+            ("點擊每日報告標籤", lambda: self.click_daily_report_tab(hwnd, window_title)),  # 傳入已獲取的句柄
             ("設定字型大小", lambda: set_font_size()),
             ("點擊今日日期", lambda: start_calendar_checker()),
             ("下載檔案", lambda: self.select_window(1)),
@@ -576,8 +703,11 @@ class MainApp:
             debug_print("按下 CTRL+Q 或 CTRL+E 開始連續下載任務")
             debug_print("按下 CTRL+D 下載當前列表檔案")
             debug_print("按下 CTRL+G 檢測檔案列表區域")
+            debug_print("按下 CTRL+B 設定字型大小")
+            debug_print("按下 CTRL+T 切換列表刷新檢測")
+            debug_print("按下 CTRL+R 列出所有控件")
+            debug_print("按下 CTRL+M 開始監控滑鼠點擊")
             debug_print("按下 ESC 停止下載")
-            debug_print(f"請確保 {Config.PROCESS_NAME} 已開啟且視窗可見")
             
             keyboard.add_hotkey('ctrl+q', self.execute_sequence)
             keyboard.add_hotkey('ctrl+e', self.execute_sequence)
@@ -585,6 +715,8 @@ class MainApp:
             keyboard.add_hotkey('ctrl+g', start_list_area_checker)
             keyboard.add_hotkey('ctrl+b', set_font_size)
             keyboard.add_hotkey('ctrl+t', self.toggle_refresh_check)
+            keyboard.add_hotkey('ctrl+r', list_all_controls)
+            keyboard.add_hotkey('ctrl+m', monitor_clicks)
             
             self.scheduler = Scheduler(self.execute_sequence)
             scheduler_thread = self.scheduler.init_scheduler()
