@@ -2,7 +2,7 @@ import win32gui
 from pywinauto.application import Application
 from datetime import datetime
 import time
-from utils import debug_print
+from utils import debug_print, find_window_handle
 
 # 全域變數用於控制停止
 should_stop = False
@@ -21,20 +21,6 @@ def reset_stop():
     """重置停止標誌"""
     global should_stop
     should_stop = False
-
-def find_window_handle(target_title=None):
-    def callback(hwnd, windows):
-        if win32gui.IsWindowVisible(hwnd):
-            title = win32gui.GetWindowText(hwnd)
-            if target_title:
-                if target_title.lower() in title.lower():
-                    windows.append((hwnd, title))
-            else:
-                if title:
-                    windows.append((hwnd, title))
-    windows = []
-    win32gui.EnumWindows(callback, windows)
-    return windows
 
 def get_list_area():
     try:

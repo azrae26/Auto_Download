@@ -12,7 +12,7 @@ from queue import Queue
 from datetime import datetime, timedelta
 from calendar_checker import start_calendar_checker
 from get_list_area import start_list_area_checker, set_stop
-from utils import debug_print
+from utils import debug_print, find_window_handle
 from scheduler import Scheduler
 from font_size_setter import set_font_size
 
@@ -22,8 +22,6 @@ class Config:
     SLEEP_INTERVAL = 0.1  # 等待時間
     CLICK_BATCH_SIZE = 5  # 批次點擊次數
     MOUSE_MAX_OFFSET = 100  # 滑鼠最大偏移量
-    TAB_SWITCH_COUNT = 3  # 切換列表次數
-    PAGE_SIZE = 10  # 每頁檔案數量
     TARGET_WINDOW = "stocks"
     PROCESS_NAME = "DOstocksBiz.exe"
 
@@ -33,19 +31,6 @@ class Config:
 
 class WindowHandler:
     """處理窗口相關操作"""
-    @staticmethod
-    def find_window_handle(target_title=None):
-        def callback(hwnd, windows):
-            if win32gui.IsWindowVisible(hwnd):
-                title = win32gui.GetWindowText(hwnd)
-                if target_title and target_title.lower() in title.lower():
-                    windows.append((hwnd, title))
-                elif not target_title and title:
-                    windows.append((hwnd, title))
-        windows = []
-        win32gui.EnumWindows(callback, windows)
-        return windows
-
     @staticmethod
     def ensure_window_visible(hwnd, window_title):
         try:
@@ -352,7 +337,7 @@ class FileProcessor:
 
                     downloaded_files.add(file_name)
                     
-                    # 如果是當前列表的最後一個檔案，切換到下�����列表
+                    # 如果是當前列表的最後一個檔案，切換到下一個列表
                     if self.is_last_file_in_list(file, list_index, all_files):
                         debug_print(f"切換到下一個列表")
                         self.navigator.switch_to_next_list(hwnd)  # 使用 navigator 來切換列表
@@ -539,7 +524,7 @@ class MainApp:
         esc_thread = threading.Thread(target=self.check_esc_key, daemon=True)
         esc_thread.start()
         
-        target_windows = WindowHandler.find_window_handle(Config.TARGET_WINDOW)
+        target_windows = find_window_handle(Config.TARGET_WINDOW)
         if 1 <= index <= len(target_windows):
             self.selected_window = target_windows[index - 1]
             debug_print(f"\n已選擇視窗: {self.selected_window[1]}")

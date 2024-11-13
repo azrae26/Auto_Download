@@ -3,7 +3,7 @@ from pywinauto.application import Application
 from datetime import datetime
 import pyautogui
 import time
-from utils import debug_print
+from utils import debug_print, find_window_handle
 
 class CalendarChecker:
     """日曆檢查器類"""
@@ -20,13 +20,7 @@ class CalendarChecker:
         
     def find_window(self):
         """找到目標視窗"""
-        windows = []
-        def callback(hwnd, _):
-            if win32gui.IsWindowVisible(hwnd):
-                title = win32gui.GetWindowText(hwnd)
-                if "stocks" in title.lower():
-                    windows.append((hwnd, title))
-        win32gui.EnumWindows(callback, windows)
+        windows = find_window_handle(self.window_title)
         
         if not windows:
             debug_print("錯誤: 找不到目標視窗")
