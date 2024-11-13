@@ -5,9 +5,16 @@ import win32con
 import time
 from pywinauto.application import Application as PywinautoApp
 import win32api
+import pyautogui
 
+# 全域常數
+SLEEP_INTERVAL = 0.1  # 基本等待時間
+
+# 全域變數
 debug_queue = Queue()
 refresh_checking = False  # 用於控制刷新檢測的開關
+last_mouse_pos = None
+is_program_moving = False
 
 def debug_print(message):
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -225,3 +232,118 @@ def stop_refresh_check():
     global refresh_checking
     refresh_checking = False
     debug_print("停止檢測列表刷新")
+
+def check_mouse_movement():
+    """檢查滑鼠是否移動"""
+    global last_mouse_pos, is_program_moving
+    
+    # 如果是程式移動滑鼠，則不檢測
+    if is_program_moving:
+        return False
+        
+    current_pos = pyautogui.position()
+    
+    if last_mouse_pos is None:
+        last_mouse_pos = current_pos
+        return False
+        
+    # 檢查是否移動超過 3 像素
+    has_moved = (abs(current_pos.x - last_mouse_pos.x) >= 3 or 
+                abs(current_pos.y - last_mouse_pos.y) >= 3)
+    
+    # 只有在非程式移動且確實檢測到移動時才更新位置
+    if has_moved and not is_program_moving:
+        last_mouse_pos = current_pos
+        
+    return has_moved
+
+def move_to_safe_position():
+    """移動到安全位置"""
+    screen_width, screen_height = pyautogui.size()
+    pyautogui.moveTo(screen_width // 2, screen_height // 2)
+    time.sleep(SLEEP_INTERVAL)  # 使用本地定義的 SLEEP_INTERVAL
+
+def click_at(x, y, is_first_click=False, clicks=1, interval=SLEEP_INTERVAL, sleep_interval=None, hwnd=None, window_title=None, target_element=None):
+    """點擊指定位置，若滑鼠移動則暫停1秒"""
+    global is_program_moving, last_mouse_pos
+    
+    try:
+        while True:
+            if hwnd is None:
+                debug_print("警告: 未提供視窗句柄")
+                return False
+
+            if window_title is None:
+                window_title = win32gui.GetWindowText(hwnd)
+
+            if not ensure_foreground_window(hwnd, window_title):
+                debug_print("警告: 無法確保視窗在前景")
+                return False
+
+            # 移動滑鼠前檢查
+            if check_mouse_movement():
+                debug_print("檢測到滑鼠移動，暫停 1 秒")
+                time.sleep(1)
+                continue
+                
+            # 設定標記為程式移動
+            is_program_moving = True
+            
+            # 移動滑鼠
+            pyautogui.moveTo(x, y)
+            time.sleep(interval)
+            
+            # 更新最後位置為目標位置並重設標記
+            last_mouse_pos = pyautogui.position()
+            is_program_moving = False
+            
+            # 檢查滑鼠是否在目標元素上
+            if target_element:
+                element_rect = target_element.rectangle()
+                current_pos = pyautogui.position()
+                if not (element_rect.left <= current_pos.x <= element_rect.right and 
+                       element_rect.top <= current_pos.y <= element_rect.bottom):
+                    debug_print("滑鼠未在目標元素上，重試...")
+                    continue
+            
+            # 點擊前再次檢查
+            if check_mouse_movement():
+                debug_print("檢測到滑鼠移動，暫停 1 秒")
+                time.sleep(1)
+                continue
+                
+            # 執行點擊
+            click_completed = True
+            for _ in range(clicks):
+                pyautogui.click()
+                if clicks > 1:
+                    time.sleep(interval)
+                    # 檢查是否仍在目標元素上
+                    if target_element:
+                        current_pos = pyautogui.position()
+                        element_rect = target_element.rectangle()
+                        if not (element_rect.left <= current_pos.x <= element_rect.right and 
+                               element_rect.top <= current_pos.y <= element_rect.bottom):
+                            debug_print("點擊過程中滑鼠離開目標元素，重試...")
+                            click_completed = False
+                            break
+                        
+                    if check_mouse_movement():
+                        debug_print("檢測到滑鼠移動，暫停 1 秒")
+                        time.sleep(1)
+                        click_completed = False
+                        break
+                        
+            if not click_completed:
+                continue
+            
+            if sleep_interval is None:
+                sleep_interval = interval * (5 if is_first_click else 1)
+            
+            time.sleep(sleep_interval)
+            return True
+            
+    except Exception as e:
+        is_program_moving = False
+        debug_print(f"點擊操作時發生錯誤: {str(e)}")
+        return False

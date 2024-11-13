@@ -12,7 +12,7 @@ from queue import Queue
 from datetime import datetime, timedelta
 from calendar_checker import start_calendar_checker
 from get_list_area import start_list_area_checker, set_stop, list_all_controls, monitor_clicks
-from utils import debug_print, find_window_handle, ensure_foreground_window, get_list_items, calculate_center_position, refresh_checking, start_refresh_check, stop_refresh_check
+from utils import debug_print, find_window_handle, ensure_foreground_window, get_list_items, calculate_center_position, refresh_checking, start_refresh_check, stop_refresh_check, click_at, move_to_safe_position, check_mouse_movement
 from scheduler import Scheduler
 from font_size_setter import set_font_size
 
@@ -41,106 +41,6 @@ class WindowHandler:
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
         return False
-
-class MouseController:
-    """處理滑鼠相關操作"""
-    last_mouse_pos = None  # 儲存上一次滑鼠位置
-    is_program_moving = False  # 標記是否為程式移動滑鼠
-    
-    @staticmethod
-    def check_mouse_movement():
-        """檢查滑鼠是否移動"""
-        # 如果是程式移動滑鼠，則不檢測
-        if MouseController.is_program_moving:
-            return False
-            
-        current_pos = pyautogui.position()
-        
-        if MouseController.last_mouse_pos is None:
-            MouseController.last_mouse_pos = current_pos
-            return False
-            
-        # 檢查是否移動超過 3 像素
-        has_moved = (abs(current_pos.x - MouseController.last_mouse_pos.x) >= 3 or 
-                    abs(current_pos.y - MouseController.last_mouse_pos.y) >= 3)
-        
-        # 只有在非程式移動且確實檢測到移動時才更新位置
-        if has_moved and not MouseController.is_program_moving:
-            MouseController.last_mouse_pos = current_pos
-            
-        return has_moved
-
-    @staticmethod
-    def move_to_safe_position():
-        """移動到安全位置"""
-        screen_width, screen_height = pyautogui.size()
-        pyautogui.moveTo(screen_width // 2, screen_height // 2)
-        time.sleep(Config.SLEEP_INTERVAL)
-
-    @staticmethod
-    def click_at(x, y, is_first_click=False, clicks=1, interval=Config.SLEEP_INTERVAL, sleep_interval=None, hwnd=None, window_title=None):
-        """點擊指定位置，若滑鼠移動則暫停1秒"""
-        try:
-            while True:
-                if hwnd is None:
-                    debug_print("警告: 未提供視窗句柄")
-                    return False
-
-                if window_title is None:
-                    window_title = win32gui.GetWindowText(hwnd)
-
-                if not ensure_foreground_window(hwnd, window_title):
-                    debug_print("警告: 無法確保視窗在前景")
-                    return False
-
-                # 移動滑鼠前檢查
-                if MouseController.check_mouse_movement():
-                    debug_print("檢測到滑鼠移動，暫停 1 秒")
-                    time.sleep(1)
-                    continue
-                    
-                # 設定標記為程式移動
-                MouseController.is_program_moving = True
-                
-                # 移動滑鼠
-                pyautogui.moveTo(x, y)
-                time.sleep(Config.SLEEP_INTERVAL)
-                
-                # 更新最後位置為目標位置並重設標記
-                MouseController.last_mouse_pos = pyautogui.position()  # 使用 position() 獲取當前位置
-                MouseController.is_program_moving = False
-                
-                # 點擊前再次檢查
-                if MouseController.check_mouse_movement():
-                    debug_print("檢測到滑鼠移動，暫停 1 秒")
-                    time.sleep(1)
-                    continue
-                    
-                # 執行點擊
-                click_completed = True
-                for _ in range(clicks):
-                    pyautogui.click()
-                    if clicks > 1:
-                        time.sleep(Config.SLEEP_INTERVAL)
-                        if MouseController.check_mouse_movement():
-                            debug_print("檢測到滑鼠移動，暫停 1 秒")
-                            time.sleep(1)
-                            click_completed = False
-                            break
-                            
-                if not click_completed:
-                    continue
-                
-                if sleep_interval is None:
-                    sleep_interval = Config.SLEEP_INTERVAL * (5 if is_first_click else 1)
-                
-                time.sleep(sleep_interval)
-                return True
-                
-        except Exception as e:
-            MouseController.is_program_moving = False
-            debug_print(f"點擊操作時發生錯誤: {str(e)}")
-            return False
 
 class ListNavigator:
     """處理列表導航相關操作"""
@@ -179,7 +79,7 @@ class ListNavigator:
                 click_y = rect.top + 10
                 
                 # 移動到位置並點擊
-                MouseController.click_at(center_x, click_y, clicks=1, hwnd=hwnd, window_title=win32gui.GetWindowText(hwnd))
+                click_at(center_x, click_y, clicks=1, hwnd=hwnd, window_title=win32gui.GetWindowText(hwnd))
                 time.sleep(Config.SLEEP_INTERVAL * 2)
                 
                 debug_print(f"已點擊下一個列表位置: x={center_x}, y={click_y}")
@@ -376,9 +276,16 @@ class FileProcessor:
                     if center_x is None or center_y is None:
                         debug_print("無法計算檔案位置，跳過此檔案")
                         continue
-                    MouseController.click_at(center_x, center_y, clicks=2, interval=Config.SLEEP_INTERVAL * 0.5, 
-                                             is_first_click=is_first_click, hwnd=hwnd, 
-                                             window_title=window_title)
+                    click_at(
+                        center_x, 
+                        center_y, 
+                        clicks=2, 
+                        interval=Config.SLEEP_INTERVAL * 0.5, 
+                        is_first_click=is_first_click, 
+                        hwnd=hwnd, 
+                        window_title=window_title,
+                        target_element=file  # 傳入目標檔案元素
+                    )
                     
                     # 如果按下 CTRL+B 設定字型大小，則不計算點擊次數
                     if not is_first_click:
@@ -455,7 +362,7 @@ class FileProcessor:
                             if center_x is None or center_y is None:
                                 debug_print("無法計算檔案位置，跳過此檔案")
                                 continue
-                            MouseController.click_at(
+                            click_at(
                                 x=center_x, 
                                 y=center_y, 
                                 is_first_click=False,
@@ -627,7 +534,7 @@ class MainApp:
             
             if center_x and center_y:
                 # 雙擊
-                MouseController.click_at(center_x, center_y, clicks=2, interval=Config.SLEEP_INTERVAL, 
+                click_at(center_x, center_y, clicks=2, interval=Config.SLEEP_INTERVAL, 
                                           hwnd=hwnd, window_title=window_title)
                 debug_print("已點擊每日報告標籤")
                 return True
@@ -682,7 +589,7 @@ class MainApp:
         
         self.start_esc_listener()  # 使用新的啟動方法
         
-        MouseController.move_to_safe_position()
+        move_to_safe_position()
         self.select_window(1)
 
     def toggle_refresh_check(self):
