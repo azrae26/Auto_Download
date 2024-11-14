@@ -15,6 +15,7 @@ from get_list_area import start_list_area_checker, set_stop, list_all_controls, 
 from utils import debug_print, find_window_handle, ensure_foreground_window, get_list_items, calculate_center_position, refresh_checking, start_refresh_check, stop_refresh_check, click_at, move_to_safe_position, check_mouse_movement
 from scheduler import Scheduler
 from font_size_setter import set_font_size
+from chrome_monitor import start_chrome_monitor
 
 class Config:
     """配置類，集中管理所有配置參數"""
@@ -475,6 +476,7 @@ class MainApp:
         self.should_stop = False
         self.stop_event = threading.Event()
         self.esc_thread = None  # 新增：保存 ESC 監聽線程的引用
+        self.chrome_monitor = None
 
     def check_esc_key(self):
         """監聽 ESC 按鍵"""
@@ -641,6 +643,10 @@ class MainApp:
         else:
             stop_refresh_check()
 
+    def monitor_chrome(self):
+        """切換 Chrome 監控狀態"""
+        self.chrome_monitor = start_chrome_monitor(self.chrome_monitor)
+
     def run(self):
         try:
             debug_print("=== 研究報告自動下載程式 ===")
@@ -652,6 +658,7 @@ class MainApp:
             keyboard.add_hotkey('ctrl+shift+t', self.toggle_refresh_check)
             keyboard.add_hotkey('ctrl+shift+r', list_all_controls)
             keyboard.add_hotkey('ctrl+shift+m', monitor_clicks)
+            keyboard.add_hotkey('ctrl+shift+k', self.monitor_chrome)
             debug_print("按下 CTRL + SHIFT + E 開始連續下載任務")
             debug_print("按下 CTRL + SHIFT + F 下載當前列表檔案")
             debug_print("按下 CTRL + SHIFT + G 檢測檔案列表區域")
@@ -659,6 +666,7 @@ class MainApp:
             debug_print("按下 CTRL + SHIFT + T 切換列表刷新檢測")
             debug_print("按下 CTRL + SHIFT + R 列出所有控件")
             debug_print("按下 CTRL + SHIFT + M 開始監控滑鼠點擊")
+            debug_print("按下 CTRL + SHIFT + K 監控 Chrome 視窗")
             
             debug_print("按下 ESC 停止下載")
             debug_print("按下 CTRL+SHIFT+Q 關閉程式")

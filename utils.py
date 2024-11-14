@@ -312,7 +312,7 @@ def click_at(x, y, is_first_click=False, clicks=1, interval=SLEEP_INTERVAL, slee
                 success = True # 點擊成功
 
                 if clicks > 1:
-                    time.sleep(interval)
+                    time.sleep(interval * 3)
             
             if success:
                 # 點擊後等待時間，第一次點擊等待時間
