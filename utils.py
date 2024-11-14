@@ -6,6 +6,21 @@ import time
 from pywinauto.application import Application as PywinautoApp
 import win32api
 import pyautogui
+from colorama import init, Fore, Style
+
+# 初始化 colorama
+init()
+
+# 顏色映射
+COLORS = {
+    'red': Fore.RED,
+    'green': Fore.GREEN,
+    'yellow': Fore.YELLOW,
+    'blue': Fore.BLUE,
+    'magenta': Fore.MAGENTA,
+    'cyan': Fore.CYAN,
+    'white': Fore.WHITE
+}
 
 # 全域常數
 SLEEP_INTERVAL = 0.1  # 基本等待時間
@@ -16,11 +31,11 @@ refresh_checking = False  # 用於控制刷新檢測的開關
 last_mouse_pos = None
 is_program_moving = False
 
-def debug_print(message):
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    formatted_message = f"[{timestamp}] {message}"
-    debug_queue.put(formatted_message)
-    print(formatted_message)
+def debug_print(message, color='white'):
+    """帶時間戳和顏色的輸出函數"""
+    timestamp = datetime.now().strftime('[%Y-%m-%d %H:%M:%S]')
+    color_code = COLORS.get(color, Fore.WHITE)
+    print(f"{timestamp} {color_code}{message}{Style.RESET_ALL}")
 
 def find_window_handle(target_title=None):
     """
@@ -54,7 +69,7 @@ def ensure_foreground_window(hwnd, window_title=None, sleep_time=0.2):
         # 檢查視窗是否最小化
         if win32gui.IsIconic(hwnd):
             window_info = f" '{window_title}'" if window_title else ""
-            debug_print(f"視窗{window_info}已最小化，正在還原...")
+            debug_print(f"視窗{window_info}已最小化，正在還原...", color='yellow')
             win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
             time.sleep(sleep_time)
         
@@ -80,11 +95,11 @@ def ensure_foreground_window(hwnd, window_title=None, sleep_time=0.2):
             return True
             
         except Exception as e:
-            debug_print(f"警告: 無法將視窗帶到前景: {str(e)}")
+            debug_print(f"警告: 無法將視窗帶到前景: {str(e)}", color='red')
             return False
             
     except Exception as e:
-        debug_print(f"確保視窗可見時發生錯誤: {str(e)}")
+        debug_print(f"確保視窗可見時發生錯誤: {str(e)}", color='red')
         return False
 
 def get_list_items(main_window, list_index=None):
@@ -97,7 +112,7 @@ def get_list_items(main_window, list_index=None):
             ).descendants(control_type="ListItem")
         return main_window.descendants(control_type="ListItem")
     except Exception as e:
-        debug_print(f"獲取列表項目時發生錯誤: {str(e)}")
+        debug_print(f"獲取列表項目時發生錯誤: {str(e)}", color='red')
         return []
 
 def calculate_center_position(rect):
@@ -107,25 +122,25 @@ def calculate_center_position(rect):
     """
     try:
         if not rect:
-            debug_print("錯誤: 無效的矩形區域")
+            debug_print("錯誤: 無效的矩形區域", color='red')
             return None, None
             
         if not hasattr(rect, 'left') or not hasattr(rect, 'right') or \
            not hasattr(rect, 'top') or not hasattr(rect, 'bottom'):
-            debug_print("錯誤: 矩形區域缺少必要屬性")
+            debug_print("錯誤: 矩形區域缺少必要屬性", color='red')
             return None, None
             
         center_x = (rect.left + rect.right) // 2
         center_y = (rect.top + rect.bottom) // 2
         
         if not isinstance(center_x, (int, float)) or not isinstance(center_y, (int, float)):
-            debug_print("錯誤: 計算結果無效")
+            debug_print("錯誤: 計算結果無效", color='red')
             return None, None
             
         return center_x, center_y
         
     except Exception as e:
-        debug_print(f"計算中心點位置時發生錯誤: {str(e)}")
+        debug_print(f"計算中心點位置時發生錯誤: {str(e)}", color='red')
         return None, None
 
 def start_refresh_check(hwnd=None):
@@ -137,13 +152,13 @@ def start_refresh_check(hwnd=None):
         if hwnd is None:
             windows = find_window_handle("stocks")
             if not windows:
-                debug_print("錯誤: 找不到目標視窗")
+                debug_print("錯誤: 找不到目標視窗", color='red')
                 return
             hwnd = windows[0][0]
             
         refresh_checking = True
         current_files = [{}, {}, {}]  # 每個列表的檔案狀態
-        debug_print("開始檢測列表刷新...")
+        debug_print("開始檢測列表刷新...", color='yellow')
         
         while refresh_checking:
             try:
@@ -162,7 +177,7 @@ def start_refresh_check(hwnd=None):
                         }
                         
                         if current_files[i] and new_files != current_files[i]:
-                            debug_print(f"檢測到列表 {i+1} 刷新")
+                            debug_print(f"檢測到列表 {i+1} 刷新", color='green')
                             
                         current_files[i] = new_files
                             
@@ -170,12 +185,12 @@ def start_refresh_check(hwnd=None):
                         continue
                         
             except Exception as e:
-                debug_print(f"檢測過程發生錯誤: {str(e)}")
+                debug_print(f"檢測過程發生錯誤: {str(e)}", color='red')
                 
             time.sleep(CHECK_INTERVAL)
             
     except Exception as e:
-        debug_print(f"檢測列表刷新時發生錯誤: {str(e)}")
+        debug_print(f"檢測列表刷新時發生錯誤: {str(e)}", color='red')
     finally:
         refresh_checking = False
 
@@ -183,7 +198,7 @@ def stop_refresh_check():
     """停止檢測列表刷新"""
     global refresh_checking
     refresh_checking = False
-    debug_print("停止檢測列表刷新")
+    debug_print("停止檢測列表刷新", color='yellow')
 
 def check_mouse_movement():
     """檢查滑鼠是否移動"""
@@ -242,11 +257,11 @@ def check_target_element(hwnd, x, y, expected_text=None):
                 except:
                     continue
                     
-        debug_print(f"點擊位置不是目標元素: {expected_text}")
+        debug_print(f"點擊位置不是目標元素: {expected_text}", color='red')
         return False
         
     except Exception as e:
-        debug_print(f"檢查元素時發生錯誤: {str(e)}")
+        debug_print(f"檢查元素時發生錯誤: {str(e)}", color='red')
         return False
 
 def click_at(x, y, is_first_click=False, clicks=1, interval=SLEEP_INTERVAL, sleep_interval=None, hwnd=None, window_title=None, expected_text=None):
@@ -260,13 +275,13 @@ def click_at(x, y, is_first_click=False, clicks=1, interval=SLEEP_INTERVAL, slee
         while retry_count < max_retries:
             # 確保視窗在前景
             if not ensure_foreground_window(hwnd, window_title):
-                debug_print("視窗不在前景，重新嘗試點擊")
+                debug_print("視窗不在前景，重新嘗試點擊", color='red')
                 retry_count += 1
                 continue
             
             # 移動滑鼠前檢查
             if check_mouse_movement():
-                debug_print("檢測到滑鼠移動，暫停 1 秒後重試")
+                debug_print("檢測到滑鼠移動，暫停 1 秒後重試", color='red')
                 time.sleep(1)
                 retry_count += 1
                 continue
@@ -295,14 +310,14 @@ def click_at(x, y, is_first_click=False, clicks=1, interval=SLEEP_INTERVAL, slee
                 
                 # 在按下和彈起之間檢查目標元素
                 if expected_text and not check_target_element(hwnd, x, y, expected_text):
-                    debug_print(f"點擊位置不是目標元素: {expected_text}，重新嘗試點擊")
+                    debug_print(f"點擊位置不是目標元素: {expected_text}，重新嘗試點擊", color='red')
                     win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
                     success = False
                     break
                 
                 # 確保視窗在前景
                 if not ensure_foreground_window(hwnd, window_title):
-                    debug_print("視窗不在前景，重新嘗試點擊")
+                    debug_print("視窗不在前景，重新嘗試點擊", color='red')
                     win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
                     success = False
                     break
@@ -322,10 +337,10 @@ def click_at(x, y, is_first_click=False, clicks=1, interval=SLEEP_INTERVAL, slee
                 retry_count += 1
                 continue
             
-        debug_print(f"已達最大重試次數 {max_retries}，放棄此次點擊")
+        debug_print(f"已達最大重試次數 {max_retries}，放棄此次點擊", color='red')
         return False
             
     except Exception as e:
         is_program_moving = False  # 確保發生錯誤時重設標記
-        debug_print(f"點擊操作時發生錯誤: {str(e)}")
+        debug_print(f"點擊操作時發生錯誤: {str(e)}", color='red')
         return False
