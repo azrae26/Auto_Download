@@ -18,9 +18,11 @@ from font_size_setter import set_font_size
 
 class Config:
     """配置類，集中管理所有配置參數"""
-    RETRY_LIMIT = 8  # 向上翻頁次數
-    SLEEP_INTERVAL = 0.1  # 基本等待時間為 0.1 秒
+    RETRY_LIMIT = 10  # 向上翻頁次數
     CLICK_BATCH_SIZE = 10  # 批次下載檔案數量
+    SLEEP_INTERVAL = 0.1  # 基本等待時間為 0.1 秒
+    DOUBLE_CLICK_INTERVAL = 0.5  # 雙擊間隔時間
+    CLICK_INTERVAL = 0.6  # 連續點擊間隔
     MOUSE_MAX_OFFSET = 100  # 滑鼠最大偏移量
     TARGET_WINDOW = "stocks"
     PROCESS_NAME = "DOstocksBiz.exe"
@@ -79,7 +81,13 @@ class ListNavigator:
                 click_y = rect.top + 10
                 
                 # 移動到位置並點擊
-                click_at(center_x, click_y, clicks=1, hwnd=hwnd, window_title=win32gui.GetWindowText(hwnd))
+                click_at(
+                    center_x, 
+                    click_y, 
+                    clicks=1, 
+                    hwnd=hwnd, 
+                    window_title=win32gui.GetWindowText(hwnd)
+                )
                 time.sleep(Config.SLEEP_INTERVAL * 2)
                 
                 debug_print(f"已點擊下一個列表位置: x={center_x}, y={click_y}")
@@ -284,7 +292,7 @@ class FileProcessor:
                         is_first_click=is_first_click, 
                         hwnd=hwnd, 
                         window_title=window_title,
-                        target_element=file  # 傳入目標檔案元素
+                        expected_text=file_name
                     )
                     
                     # 如果按下 CTRL+B 設定字型大小，則不計算點擊次數
@@ -369,7 +377,8 @@ class FileProcessor:
                                 clicks=2,
                                 interval=Config.SLEEP_INTERVAL,
                                 hwnd=hwnd,
-                                window_title=win32gui.GetWindowText(hwnd)
+                                window_title=win32gui.GetWindowText(hwnd),
+                                expected_text=file_name
                             )
                             click_count += 1
                             
@@ -637,14 +646,14 @@ class MainApp:
             debug_print("=== 研究報告自動下載程式 ===")
             
             keyboard.add_hotkey('ctrl+shift+e', self.execute_sequence)
-            keyboard.add_hotkey('ctrl+shift+d', self.download_current_list)
+            keyboard.add_hotkey('ctrl+shift+f', self.download_current_list)
             keyboard.add_hotkey('ctrl+shift+g', start_list_area_checker)
             keyboard.add_hotkey('ctrl+shift+b', set_font_size)
             keyboard.add_hotkey('ctrl+shift+t', self.toggle_refresh_check)
             keyboard.add_hotkey('ctrl+shift+r', list_all_controls)
             keyboard.add_hotkey('ctrl+shift+m', monitor_clicks)
             debug_print("按下 CTRL + SHIFT + E 開始連續下載任務")
-            debug_print("按下 CTRL + SHIFT + D 下載當前列表檔案")
+            debug_print("按下 CTRL + SHIFT + F 下載當前列表檔案")
             debug_print("按下 CTRL + SHIFT + G 檢測檔案列表區域")
             debug_print("按下 CTRL + SHIFT + B 設定字型大小")
             debug_print("按下 CTRL + SHIFT + T 切換列表刷新檢測")

@@ -215,66 +215,117 @@ def move_to_safe_position():
     pyautogui.moveTo(screen_width // 2, screen_height // 2)
     time.sleep(SLEEP_INTERVAL)  # 使用本地定義的 SLEEP_INTERVAL
 
-def check_mouse_on_element(target_element, current_pos=None):
-    """檢查滑鼠是否在目標元素上"""
-    if not target_element:
-        return True
-        
-    if current_pos is None:
-        current_pos = pyautogui.position()
-        
-    element_rect = target_element.rectangle()
-    return (element_rect.left <= current_pos.x <= element_rect.right and 
-            element_rect.top <= current_pos.y <= element_rect.bottom)
 
-def click_at(x, y, is_first_click=False, clicks=1, interval=SLEEP_INTERVAL, sleep_interval=None, hwnd=None, window_title=None, target_element=None):
-    """點擊指定位置，若滑鼠移動則暫停1秒"""
+def check_target_element(hwnd, x, y, expected_text=None):
+    """檢查指定位置的元素是否符合預期"""
+    try:
+        # 如果沒有預期文字，則返回 True
+        if not expected_text:
+            return True
+            
+        # 連接到視窗
+        app = PywinautoApp(backend="uia").connect(handle=hwnd)
+        main_window = app.window(handle=hwnd)
+        
+        # 搜索範圍（像素）
+        search_range = 5
+        
+        # 在周圍區域搜索元素
+        for offset_x in range(-search_range, search_range + 1): # 負數
+            for offset_y in range(-search_range, search_range + 1): # 負數
+                try:
+                    element = main_window.from_point(x + offset_x, y + offset_y) # 正負數
+                    if element:
+                        element_text = element.window_text() # 文字
+                        if element_text == expected_text: # 文字比對
+                            return True
+                except:
+                    continue
+                    
+        debug_print(f"點擊位置不是目標元素: {expected_text}")
+        return False
+        
+    except Exception as e:
+        debug_print(f"檢查元素時發生錯誤: {str(e)}")
+        return False
+
+def click_at(x, y, is_first_click=False, clicks=1, interval=SLEEP_INTERVAL, sleep_interval=None, hwnd=None, window_title=None, expected_text=None):
+    """使用 win32api 進行點擊，並檢查元素文字"""
     global is_program_moving, last_mouse_pos
     
-    try:
-        while True:
+    try: 
+        max_retries = 10  # 最大重試次數
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            # 確保視窗在前景
             if not ensure_foreground_window(hwnd, window_title):
-                return False
-
+                debug_print("視窗不在前景，重新嘗試點擊")
+                retry_count += 1
+                continue
+            
             # 移動滑鼠前檢查
             if check_mouse_movement():
-                debug_print("檢測到滑鼠移動，暫停 1 秒")
+                debug_print("檢測到滑鼠移動，暫停 1 秒後重試")
                 time.sleep(1)
+                retry_count += 1
                 continue
                 
             # 設定標記為程式移動並執行移動
             is_program_moving = True
-            pyautogui.moveTo(x, y)
-            time.sleep(interval)
+            win32api.SetCursorPos((x, y))
+            time.sleep(interval * 0.1)
             
             # 更新位置並重設標記
             current_pos = pyautogui.position()
             last_mouse_pos = current_pos
             is_program_moving = False
             
-            # 檢查滑鼠位置
-            if not check_mouse_on_element(target_element, current_pos):
-                debug_print("滑鼠未在目標元素上，重試...")
-                continue
+            # 計算絕對座標
+            normalized_x = int(x * 65535 / win32api.GetSystemMetrics(0))
+            normalized_y = int(y * 65535 / win32api.GetSystemMetrics(1))
             
             # 執行點擊
-            click_completed = True
             for _ in range(clicks):
-                pyautogui.click()
+                
+                
+                win32api.mouse_event(win32con.MOUSEEVENTF_ABSOLUTE | win32con.MOUSEEVENTF_MOVE, 
+                                   normalized_x, normalized_y, 0, 0)
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                
+                # 在按下和彈起之間檢查目標元素
+                if expected_text and not check_target_element(hwnd, x, y, expected_text):
+                    debug_print(f"點擊位置不是目標元素: {expected_text}，重新嘗試點擊")
+                    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                    success = False
+                    break
+                
+                # 確保視窗在前景
+                if not ensure_foreground_window(hwnd, window_title):
+                    debug_print("視窗不在前景，重新嘗試點擊")
+                    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                    success = False
+                    break
+                
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                
+                success = True # 點擊成功
+
                 if clicks > 1:
                     time.sleep(interval)
-                    if not check_mouse_on_element(target_element) or check_mouse_movement():
-                        debug_print("點擊過程中檢測到問題，重試...")
-                        click_completed = False
-                        break
-                        
-            if not click_completed:
+            
+            if success:
+                # 點擊後等待時間，第一次點擊等待時間
+                time.sleep(sleep_interval or (interval * (5 if is_first_click else 1)))
+                return True
+            else:
+                retry_count += 1
                 continue
             
-            time.sleep(sleep_interval or (interval * (5 if is_first_click else 1)))
-            return True
+        debug_print(f"已達最大重試次數 {max_retries}，放棄此次點擊")
+        return False
             
     except Exception as e:
-        is_program_moving = False
+        is_program_moving = False  # 確保發生錯誤時重設標記
         debug_print(f"點擊操作時發生錯誤: {str(e)}")
         return False
