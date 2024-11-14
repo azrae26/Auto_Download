@@ -590,7 +590,7 @@ class MainApp:
             ("下載上週檔案", lambda: download_days_weeks(0, 1)),  # 下載上週檔案
             ("點擊日歷空白處", lambda: start_click_calendar_blank()),
             ("下載上週檔案", lambda: download_days_weeks(0, 1)),  # 下載上週檔案
-            
+
             ("點擊日歷空白處", lambda: start_click_calendar_blank()),
             ("鍵盤向下X4", lambda: [pyautogui.press('down') for _ in range(4)]),
         ]
@@ -643,21 +643,21 @@ class MainApp:
             keyboard.add_hotkey('ctrl+shift+t', self.toggle_refresh_check)
             keyboard.add_hotkey('ctrl+shift+r', list_all_controls)
             keyboard.add_hotkey('ctrl+shift+m', monitor_clicks)
-            debug_print("按下 CTRL+SHIFT+E 開始連續下載任務")
-            debug_print("按下 CTRL+SHIFT+D 下載當前列表檔案")
-            debug_print("按下 CTRL+SHIFT+G 檢測檔案列表區域")
-            debug_print("按下 CTRL+SHIFT+B 設定字型大小")
-            debug_print("按下 CTRL+SHIFT+T 切換列表刷新檢測")
-            debug_print("按下 CTRL+SHIFT+R 列出所有控件")
-            debug_print("按下 CTRL+SHIFT+M 開始監控滑鼠點擊")
+            debug_print("按下 CTRL + SHIFT + E 開始連續下載任務")
+            debug_print("按下 CTRL + SHIFT + D 下載當前列表檔案")
+            debug_print("按下 CTRL + SHIFT + G 檢測檔案列表區域")
+            debug_print("按下 CTRL + SHIFT + B 設定字型大小")
+            debug_print("按下 CTRL + SHIFT + T 切換列表刷新檢測")
+            debug_print("按下 CTRL + SHIFT + R 列出所有控件")
+            debug_print("按下 CTRL + SHIFT + M 開始監控滑鼠點擊")
             
             debug_print("按下 ESC 停止下載")
             debug_print("按下 CTRL+SHIFT+Q 關閉程式")
             self.scheduler = Scheduler(self.execute_sequence)
-            scheduler_thread = self.scheduler.init_scheduler()
-            schedule_times = Config.get_schedule_times()
+            scheduler_thread = self.scheduler.init_scheduler() # 初始化排程器
+            schedule_times = Config.get_schedule_times() # 獲取排程時間
             
-            keyboard.wait('ctrl+shift+q')
+            keyboard.wait('ctrl+shift+q') # 等待按下 CTRL+SHIFT+Q 關閉程式
                 
         except KeyboardInterrupt:
             debug_print("\n程式已結束")
