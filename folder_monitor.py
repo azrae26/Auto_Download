@@ -20,7 +20,7 @@ class FolderMonitor:
         # 包含以下關鍵字排除複製
         self.exclude_copy_files = [
             'sync.ffs_db',
-            '_公司', '_晨訊', '_週報', '_策略', '_產業', '_ETF', '_supply chain'
+            '_公司', '晨訊', '週報', '策略', '產業', 'ETF', 'supply chain'
         ]
         
     def log_total_files(self, total_count):
@@ -80,7 +80,7 @@ class FolderMonitor:
                     self.log_date_statistics(date_counts)
                     
         except Exception as e:
-            debug_print(f"掃描資料夾時發生錯誤: {str(e)}")
+            debug_print(f"掃描資料夾時發生錯誤: {str(e)}", color='light_red')
             
         return new_files
     
@@ -88,7 +88,7 @@ class FolderMonitor:
         """開始監控"""
         self.is_monitoring = True
         debug_print(f"\n開始監控資料夾: {self.folder_path}")
-        self.scan_new_files()
+        self.scan_new田_files()
         
     def stop_monitoring(self):
         """停止監控"""
@@ -106,7 +106,7 @@ class FolderMonitor:
             shutil.copy2(source, target)
             debug_print(f"已複製: {filename}", color='blue')
         except Exception as e:
-            debug_print(f"複製檔案失敗: {filename}, 錯誤: {str(e)}", color='red')
+            debug_print(f"複製檔案失敗: {filename}, 錯誤: {str(e)}", color='light_red')
     
     def copy_today_files(self):
         """複製今日所有新檔案，但排除特定檔案"""
@@ -137,7 +137,7 @@ class FolderMonitor:
             debug_print("==========================")
 
         except Exception as e:
-            debug_print(f"複製檔案過程發生錯誤: {str(e)}")
+            debug_print(f"複製檔案過程發生錯誤: {str(e)}", color='light_red')
 
 def start_folder_monitor(existing_monitor=None):
     """啟動或切換資料夾監控"""

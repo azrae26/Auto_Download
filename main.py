@@ -12,7 +12,10 @@ from queue import Queue
 from datetime import datetime, timedelta
 from calendar_checker import start_calendar_checker, start_click_calendar_blank
 from get_list_area import start_list_area_checker, set_stop, list_all_controls, monitor_clicks
-from utils import debug_print, find_window_handle, ensure_foreground_window, get_list_items, calculate_center_position, refresh_checking, start_refresh_check, stop_refresh_check, click_at, move_to_safe_position, check_mouse_movement
+from utils import (debug_print, find_window_handle, ensure_foreground_window, 
+                  get_list_items_by_id, calculate_center_position, refresh_checking, 
+                  start_refresh_check, stop_refresh_check, click_at, move_to_safe_position, 
+                  check_mouse_movement, scroll_to_file, is_file_visible)
 from scheduler import Scheduler
 from font_size_setter import set_font_size
 from chrome_monitor import start_chrome_monitor
@@ -23,7 +26,7 @@ class Config:
     RETRY_LIMIT = 10  # 向上翻頁次數
     CLICK_BATCH_SIZE = 10  # 批次下載檔案數量
     SLEEP_INTERVAL = 0.1  # 基本等待時間為 0.1 秒
-    DOUBLE_CLICK_INTERVAL = 0.5  # 雙擊間隔間
+    DOUBLE_CLICK_INTERVAL = 0.1  # 雙擊間隔間
     CLICK_INTERVAL = 0.6  # 連續點擊間隔
     MOUSE_MAX_OFFSET = 100  # 滑鼠最大偏移量
     TARGET_WINDOW = "stocks"
@@ -31,7 +34,12 @@ class Config:
 
     @staticmethod
     def get_schedule_times():
-        return ["10:00"] # 排程時間
+        """返回排程時間列表"""
+        return [
+            {'type': 'daily', 'time': '10:00'},  # 每日固定時間
+            #{'type': 'weekly', 'weekday': 'wednesday', 'time': '11:00'},  # 每週三 11 點
+            {'type': 'once', 'date': '2024-11-15', 'time': '10:50'}  # 單次執行時間
+        ]
 
 class WindowHandler:
     """處理窗口相關操作"""
@@ -61,7 +69,7 @@ class ListNavigator:
 
     def switch_to_next_list(self, hwnd):
         """切換到下一個列表"""
-        debug_print("開始切換列表: 點擊左鍵")
+        debug_print("開始切換列表: 點擊左鍵", color='yellow')
         
         try:
             # 連接到視窗
@@ -98,7 +106,7 @@ class ListNavigator:
                 debug_print("警告: 找不到足夠的列表區域")
             
         except Exception as e:
-            debug_print(f"切換列表時發生錯誤: {str(e)}")
+            debug_print(f"切換列表時發生錯誤: {str(e)}", color='light_red')
         
         self.after_tab_switch = True
 
@@ -159,19 +167,6 @@ class FileProcessor:
         pyautogui.FAILSAFE = False
 
     @staticmethod
-    def is_file_visible(file, list_area):
-        """檢查檔案是否在可視範圍內"""
-        try:
-            file_rect = file.rectangle() # 獲取檔案的矩形
-            list_rect = list_area.rectangle()  # 獲取列表區域的矩形
-            # file_rect.top >= list_rect.top 檢查檔案頂部是否在列表區域的上方
-            # file_rect.bottom <= list_rect.bottom 檢查檔案底部是否在列表區域的下方
-            return (file_rect.top >= list_rect.top and file_rect.bottom <= list_rect.bottom) # 檢查檔案是否在列表區域的可視範圍內
-        except Exception as e:
-            debug_print(f"檢查檔案可見性時發生錯誤: {str(e)}")
-            return False
-
-    @staticmethod
     def is_last_file_in_current_list(file, current_list_items):
         """判斷是否為當前列表的最後一個檔案"""
         try:
@@ -180,7 +175,7 @@ class FileProcessor:
             # 如果是列表中的最後一個項目
             return current_index == len(current_list_items) - 1
         except Exception as e:
-            debug_print(f"檢查檔案位置時發生錯誤: {str(e)}")
+            debug_print(f"檢查檔案位置時發生錯誤: {str(e)}", color='light_red')
             return False
 
     def close_windows(self, count):
@@ -207,7 +202,7 @@ class FileProcessor:
             time.sleep(Config.SLEEP_INTERVAL)  # 等待 0.1秒 所有視窗關閉
             
         except Exception as e:
-            debug_print(f"關閉視窗時發生錯誤: {str(e)}")
+            debug_print(f"關閉視窗時發生錯誤: {str(e)}", color='light_red')
             # 確保 CTRL 鍵被釋放
             keyboard.release('ctrl')
 
@@ -219,7 +214,7 @@ class FileProcessor:
                 return
 
             if not ensure_foreground_window(hwnd, window_title):
-                debug_print("錯誤: 無法確保視窗可見", color='red')
+                debug_print("錯誤: 無法確保視窗可見", color='light_red')
                 return
 
             main_window = app.window(handle=hwnd)
@@ -236,7 +231,7 @@ class FileProcessor:
             
             for i, list_area in enumerate(['左側列表', '中間列表', '右側列表']):
                 debug_print(f"獲取{list_area}檔案...", color='cyan')
-                files = get_list_items(main_window, i)
+                files = get_list_items_by_id(main_window, i)
                 if files:  # 只處理有檔案的列表
                     file_count = len([f for f in files if not f.window_text().endswith("_公司")])
                     if file_count > 0:  # 確保有可下載的檔案
@@ -274,9 +269,9 @@ class FileProcessor:
                     
                     # 使用對應的有效列表區域
                     list_area = valid_areas[area_index]
-                    if not self.is_file_visible(file, list_area):
-                        debug_print(f"檔案 '{file_name}' 不在可視範圍內，嘗試調整位置")
-                        if not self.scroll_to_file(file, list_area, hwnd):
+                    if not is_file_visible(file, list_area):
+                        debug_print(f"檔案 '{file_name}' 不在可視範圍內，嘗試調整位置", color='blue')
+                        if not scroll_to_file(file, list_area, hwnd):
                             debug_print(f"無法使檔案 '{file_name}' 進入可視範圍，跳過")
                             continue
 
@@ -312,11 +307,11 @@ class FileProcessor:
                     # 如果是當前列表的最後一個檔案，切換到下一個列表
                     if self.is_last_file_in_list(file, area_index, all_files):
                         debug_print(f"切換到下一個列表", color='cyan')
-                        debug_print(f"開始切換列表: 點擊左鍵", color='blue')
+                        debug_print(f"開始切換列表: 點擊左鍵", color='yellow')
                         self.navigator.switch_to_next_list(hwnd)
 
                 except Exception as e:
-                    debug_print(f"處理檔案時發生錯誤: {str(e)}")
+                    debug_print(f"處理檔案時發生錯誤: {str(e)}", color='light_red')
                     continue
 
             # 關閉剩餘視窗
@@ -324,7 +319,7 @@ class FileProcessor:
                 self.close_windows(click_count)
 
             # 檢查是否有漏掉的檔案
-            debug_print("檢查是否有漏掉的檔案...", color='cyan')
+            debug_print("檢查是否有漏掉的檔案...", color='magenta')
             new_files = set(file.window_text() for file, _ in self.get_all_files(main_window))
             missed_files = new_files - downloaded_files
             
@@ -335,7 +330,7 @@ class FileProcessor:
             debug_print("所有檔案下載完成", color='green')
 
         except Exception as e:
-            debug_print(f"發生錯誤: {str(e)}", color='red')
+            debug_print(f"發生錯誤: {str(e)}", color='light_red')
 
     def is_last_file_in_list(self, current_file, list_index, all_files):
         """判斷是否為當前列表的最後一個檔案"""
@@ -349,7 +344,7 @@ class FileProcessor:
         """獲取所有檔案"""
         all_files = []
         for i in range(3):  # 三個列表
-            files = get_list_items(main_window, i)
+            files = get_list_items_by_id(main_window, i)
             all_files.extend([(file, i) for file in files if not file.window_text().endswith("_公司")])
         return all_files
 
@@ -363,7 +358,7 @@ class FileProcessor:
             try:
                 # 在所有列表中尋找檔案
                 for i in range(3):
-                    files = get_list_items(main_window, i)
+                    files = get_list_items_by_id(main_window, i)
                     for file in files:
                         if file.window_text() == file_name:
                             # 使用與主下載相同的邏
@@ -390,83 +385,12 @@ class FileProcessor:
                             
                             break
             except Exception as e:
-                debug_print(f"下載漏掉的檔案時發生錯誤: {str(e)}")
+                debug_print(f"下載漏掉的檔案時發生錯誤: {str(e)}", color='light_red')
                 continue
         
         # 關閉剩餘視窗
         if click_count > 0:
             self.close_windows(click_count)
-
-    def scroll_to_file(self, file, list_area, hwnd):
-        """滾動直到檔案進入可視範圍"""
-        try:
-            # 連接到視窗
-            app = PywinautoApp(backend="uia").connect(handle=hwnd)
-            main_window = app.window(handle=hwnd)
-            
-            # 獲取列表區域的矩形
-            list_rect = list_area.rectangle()
-            
-            # 獲取當前列表的所有檔案
-            current_files = get_list_items(list_area)
-            target_name = file.window_text()
-            
-            # 找到目標檔案的索引
-            target_index = -1
-            for i, f in enumerate(current_files):
-                if f.window_text() == target_name:
-                    target_index = i
-                    break
-            
-            if target_index == -1:
-                debug_print(f"在列表中找不到檔案: {target_name}", color='red')
-                return False
-            
-            # 找到當前可見的第一個檔案的索引
-            visible_index = -1
-            for i, f in enumerate(current_files):
-                if self.is_file_visible(f, list_area):
-                    visible_index = i
-                    debug_print(f"當前可見的第一個檔案索引: {i}", color='cyan')
-                    debug_print(f"檔案名稱: {f.window_text()}", color='blue')
-                    break
-            
-            if visible_index == -1:
-                debug_print("找不到可見的檔案", color='yellow')
-                return False
-            
-            debug_print(f"目標檔案索引: {target_index}", color='cyan')
-            debug_print(f"可見檔案索引: {visible_index}", color='cyan')
-            
-            # 根據索引決定滾動方向
-            max_attempts = 8
-            for attempt in range(max_attempts):
-                if self.is_file_visible(file, list_area):
-                    debug_print("檔案已在可視範圍內", color='green')
-                    return True
-                
-                if not ensure_foreground_window(hwnd):
-                    debug_print("警告: 無法確保視窗在前景", color='yellow')
-                    
-                if target_index < visible_index:
-                    debug_print(f"目標檔案在可見區域上方，向上翻頁 (第 {attempt + 1} 次)", color='blue')
-                    pyautogui.press('pageup')
-                else:
-                    debug_print(f"目標檔案在可見區域下方，向下翻頁 (第 {attempt + 1} 次)", color='blue')
-                    pyautogui.press('pagedown')
-                time.sleep(0.5)
-                
-                # 更新可見檔案的索引
-                for i, f in enumerate(current_files):
-                    if self.is_file_visible(f, list_area):
-                        visible_index = i
-                        break
-            
-            return False
-                
-        except Exception as e:
-            debug_print(f"滾動到檔案位置時發生錯誤: {str(e)}", color='red')
-            return False
 
 class MainApp:
     """主應用程序類"""
@@ -506,15 +430,19 @@ class MainApp:
             self.esc_thread.join(timeout=1.0) # 等待1秒，確保線程結束
 
     def select_window(self, index):
-        """選擇視窗"""
+        """選擇視窗並處理檔案"""
         self.start_esc_listener()  # 使用新的啟動方法
         
+        # 獲取視窗句柄
         target_windows = find_window_handle(Config.TARGET_WINDOW)
         if 1 <= index <= len(target_windows):
+            # 選擇視窗
             self.selected_window = target_windows[index - 1]
             debug_print(f"\n已選擇視窗: {self.selected_window[1]}")
             hwnd, window_title = self.selected_window
-            app = PywinautoApp(backend="uia").connect(handle=hwnd)
+            # 連接到視窗
+            app = PywinautoApp(backend="uia").connect(handle=hwnd)            
+            # 處理檔案
             self.file_processor.process_files(app, hwnd, window_title, lambda: self.should_stop)
         else:
             debug_print("無效的選擇")
@@ -530,7 +458,7 @@ class MainApp:
             
             # 確保視窗在前景
             if not ensure_foreground_window(hwnd, window_title):
-                debug_print("警告: 無法確保視窗前景")
+                debug_print("警告: 無法確保視窗前景", color='light_red')
                 return False
                 
             # 連接到視窗
@@ -548,20 +476,20 @@ class MainApp:
                 # 雙擊
                 click_at(center_x, center_y, clicks=2, interval=Config.SLEEP_INTERVAL, 
                                           hwnd=hwnd, window_title=window_title)
-                debug_print("已點擊每日報告標籤")
+                debug_print("已點擊每日報告標籤", color='yellow')
                 return True
             else:
                 debug_print("無法獲取每日報告標籤位置")
                 return False
                 
         except Exception as e:
-            debug_print(f"點擊每日報告標籤時發生錯誤: {str(e)}")
+            debug_print(f"點擊每日報告標籤時發生錯誤: {str(e)}", color='light_red')
             return False
 
     def execute_sequence(self):
         """執行連續任務"""
         self.start_esc_listener()
-        debug_print("開始執行連續任務...", color='cyan')
+        debug_print("開始執行連續任務...", color='light_blue')
         
         # 先獲取視窗句柄
         hwnd, window_title = self.selected_window or find_window_handle(Config.TARGET_WINDOW)[0]
@@ -569,13 +497,13 @@ class MainApp:
         def press_left_or_up(left_times, up_times):
             """連續按左或上鍵指定次數"""
             if left_times > 0:
-                debug_print(f"按下左鍵 {left_times} 次", color='blue')
+                debug_print(f"按下左鍵 {left_times} 次", color='orange')
             for _ in range(left_times):
                 pyautogui.press('left')
                 time.sleep(Config.SLEEP_INTERVAL)
             
             if up_times > 0:
-                debug_print(f"按下上鍵 {up_times} 次", color='blue')
+                debug_print(f"按下上鍵 {up_times} 次", color='orange')
             for _ in range(up_times):
                 pyautogui.press('up')
                 time.sleep(Config.SLEEP_INTERVAL)
@@ -583,13 +511,14 @@ class MainApp:
         def download_days_weeks(days_ago, weeks_ago):
             """下載 N 天前、或 N 週前的檔案"""
             if days_ago > 0 or weeks_ago > 0:  # 修改條件判斷
-                press_left_or_up(days_ago, weeks_ago)
-            self.select_window(1)
+                press_left_or_up(days_ago, weeks_ago) # 滾動到目標檔案
+            self.select_window(1) # 選擇視窗
         
         # 基本步驟
         steps = [
             ("點擊每日報告標籤", lambda: self.click_daily_report_tab(hwnd, window_title)),  # 傳入已獲取的句柄
             ("設定字型大小", lambda: set_font_size()),
+            ("點擊今日", lambda: start_calendar_checker(0)),
             ("下載今日檔案", lambda: download_days_weeks(0, 0)),  # 下載今日檔案
             ("點擊今日", lambda: start_calendar_checker(0)),
             ("下載昨日檔案", lambda: download_days_weeks(1, 0)),  # 下載昨日檔案
@@ -614,7 +543,7 @@ class MainApp:
                 debug_print("任務已停止", color='yellow')
                 break
             
-            debug_print(f"步驟{i}: {step_name}", color='cyan')
+            debug_print(f"步驟{i}: {step_name}", color='yellow')
             step_func()
             time.sleep(1)
         
@@ -626,7 +555,7 @@ class MainApp:
         self.should_stop = False
         self.stop_event.clear()
         
-        debug_print("開始下載當前列表檔案...", color='cyan')
+        debug_print("開始下載當前列表檔案...", color='light_blue')
         
         self.start_esc_listener()
         move_to_safe_position()
@@ -636,7 +565,7 @@ class MainApp:
         """切換列表刷新檢測"""
         if not refresh_checking:
             hwnd = self.selected_window[0] if self.selected_window else None
-            debug_print("開始檢測列表刷新", color='cyan')
+            debug_print("開始檢測列表刷新", color='magenta')
             threading.Thread(
                 target=start_refresh_check,
                 args=(hwnd,),
@@ -655,10 +584,40 @@ class MainApp:
         folder_monitor = FolderMonitor()
         folder_monitor.copy_today_files()
 
+    def list_all_reports(self):
+        """列出所有報告清單"""
+        try:
+            # 獲取視窗句柄
+            windows = find_window_handle(Config.TARGET_WINDOW)
+            if not windows:
+                debug_print("找不到目標視窗", color='light_red')
+                return
+            
+            hwnd = windows[0][0]
+            app = PywinautoApp(backend="uia").connect(handle=hwnd)
+            main_window = app.window(handle=hwnd)
+            
+            # 列出三個列表的內容
+            list_types = {
+                'morning': '晨會報告',
+                'research': '研究報告',
+                'industry': '產業報告'
+            }
+            
+            for list_type, list_name in list_types.items():
+                debug_print(f"\n=== {list_name} ===", color='cyan')
+                items = get_list_items_by_id(main_window, list_type)
+                for i, item in enumerate(items, 1):
+                    debug_print(f"{i}. {item.window_text()}", color='green')
+                
+        except Exception as e:
+            debug_print(f"列出報告清單時發生錯誤: {str(e)}", color='light_red')
+
     def run(self):
         try:
-            debug_print("=== 研究報告自動下載程式 ===", color='yellow')
+            debug_print("=== 研究報告自動下載程式 ===", color='light_blue')
             
+            # 註冊所有熱鍵
             keyboard.add_hotkey('ctrl+shift+e', self.execute_sequence)
             keyboard.add_hotkey('ctrl+shift+f', self.download_current_list)
             keyboard.add_hotkey('ctrl+shift+g', start_list_area_checker)
@@ -668,8 +627,9 @@ class MainApp:
             keyboard.add_hotkey('ctrl+shift+m', monitor_clicks)
             keyboard.add_hotkey('ctrl+shift+k', self.monitor_chrome)
             keyboard.add_hotkey('ctrl+shift+f12', self.copy_today_files)
+            keyboard.add_hotkey('ctrl+shift+f11', self.list_all_reports)  # 添加新的快捷鍵
 
-            # 使用不同顏色顯示熱鍵提示
+            # 顯示熱鍵說明
             debug_print("\n=== 快捷鍵說明 ===", color='cyan')
             debug_print("按下 CTRL + SHIFT + E    開始連續下載任務", color='green')
             debug_print("按下 CTRL + SHIFT + F    下載當前列表檔案", color='green')
@@ -679,6 +639,7 @@ class MainApp:
             debug_print("按下 CTRL + SHIFT + R    列出所有控件", color='green')
             debug_print("按下 CTRL + SHIFT + M    開始監控滑鼠點擊", color='green')
             debug_print("按下 CTRL + SHIFT + K    監控 Chrome 視窗", color='green')
+            debug_print("按下 CTRL + SHIFT + F11  列出所有報告清單", color='green')
             debug_print("按下 CTRL + SHIFT + F12  複製今日所有新檔案", color='green')
             debug_print("按下 ESC                 停止下載", color='yellow')
             debug_print("按下 CTRL+SHIFT+Q        關閉程式", color='red')
@@ -688,24 +649,24 @@ class MainApp:
             scheduler_thread = self.scheduler.init_scheduler() # 初始化排程器
             schedule_times = Config.get_schedule_times() # 獲取排程時間
             
-            keyboard.wait('ctrl+shift+q') # 等待按下 CTRL+SHIFT+Q 關閉程式
-                
-        except KeyboardInterrupt:
-            debug_print("\n程式已結束", color='red')
+            # 使用阻塞方式等待 Ctrl+Shift+Q
+            try:
+                keyboard.wait('ctrl+shift+q')
+                debug_print("收到關閉程式的命令", color='yellow')
+            except Exception as e:
+                debug_print(f"等待關閉命令時發生錯誤: {str(e)}", color='light_red')
+            
+        except Exception as e:
+            debug_print(f"程式執行時發生錯誤: {str(e)}", color='light_red')
         finally:
+            debug_print("正在清理並關閉程式...", color='yellow')
             keyboard.unhook_all()
 
 def main():
     app = MainApp()  # 創建主應用程式實例
-    folder_monitor = start_folder_monitor() # 啟動資料夾監控
     
     try:
         app.run()  # 運行主應用程式
-        while True:
-            # 掃描新檔案
-            if folder_monitor and folder_monitor.is_monitoring:
-                folder_monitor.scan_new_files()
-            time.sleep(1)
     except:  # 捕獲所有異常但不處理
         pass
 

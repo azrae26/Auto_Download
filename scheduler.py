@@ -5,32 +5,64 @@ from datetime import datetime
 from utils import debug_print
 
 class Scheduler:
-    def __init__(self, execute_sequence_func):
-        self.execute_sequence = execute_sequence_func
-
-    def run_scheduled_task(self):
+    def __init__(self, task_func):
+        self.task_func = task_func
+        
+    def run_scheduled_task(self, schedule_type=None, schedule_date=None):
         """執行排程任務"""
-        debug_print(f"[排程器] 開始執行排程任務 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        self.execute_sequence()
-
-    def start_scheduler(self):
-        """啟動排程器"""
-        debug_print("[排程器] 排程器已啟動")
-
-        # 從 Config 獲取所有排程時間並設定
+        current_time = datetime.now()
+        
+        # 檢查是否為單次執行且日期已過
+        if schedule_type == 'once' and schedule_date:
+            if current_time.date() > schedule_date.date():
+                return schedule.CancelJob
+                
+        debug_print(f"執行排程任務: {current_time.strftime('%Y-%m-%d %H:%M')}", color='light_blue')
+        self.task_func()
+        
+        # 如果是單次執行，完成後取消任務
+        if schedule_type == 'once':
+            return schedule.CancelJob
+            
+    def init_scheduler(self):
+        """初始化排程器"""
+        schedule.clear()  # 清除所有排程
+        
+        # 從 Config 獲取排程時間
         from main import Config
         schedule_times = Config.get_schedule_times()
         
-        for time_str in schedule_times:
-            schedule.every().day.at(time_str).do(self.run_scheduled_task)
-            debug_print(f"[排程器] 已設定每日 {time_str} 自動執行下載任務")
+        for schedule_info in schedule_times:
+            time_str = schedule_info['time']  # 時間字串 (HH:MM)
+            
+            if schedule_info['type'] == 'daily':
+                # 每日執行
+                schedule.every().day.at(time_str).do(self.run_scheduled_task)
+                debug_print(f"每日排程: {time_str}", color='cyan')
                 
+            elif schedule_info['type'] == 'weekly':
+                # 每週特定日執行
+                weekday = schedule_info['weekday'].lower()
+                getattr(schedule.every(), weekday).at(time_str).do(self.run_scheduled_task)
+                debug_print(f"每週排程: 每週{weekday} {time_str}", color='cyan')
+                
+            elif schedule_info['type'] == 'once':
+                # 單次執行
+                schedule_date = datetime.strptime(schedule_info['date'], '%Y-%m-%d')
+                schedule.every().day.at(time_str).do(
+                    self.run_scheduled_task, 
+                    schedule_type='once',
+                    schedule_date=schedule_date
+                )
+                debug_print(f"新增單次排程: {schedule_info['date']} {time_str}", color='cyan')
+        
+        # 啟動排程執行緒
+        thread = threading.Thread(target=self._run_scheduler, daemon=True)
+        thread.start()
+        return thread
+    
+    def _run_scheduler(self):
+        """運行排程器"""
         while True:
             schedule.run_pending()
             time.sleep(1)
-
-    def init_scheduler(self):
-        """初始化排程器"""
-        scheduler_thread = threading.Thread(target=self.start_scheduler, daemon=True)
-        scheduler_thread.start()
-        return scheduler_thread

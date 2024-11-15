@@ -4,7 +4,8 @@ import win32con
 from pywinauto.application import Application as PywinautoApp
 from datetime import datetime
 import time
-from utils import debug_print, find_window_handle, ensure_foreground_window, get_list_items
+from utils import (debug_print, find_window_handle, ensure_foreground_window, 
+                  get_list_items_by_id)
 
 TARGET_WINDOW = "stocks"  # 直接定義常數
 
@@ -25,6 +26,10 @@ def reset_stop():
     """重置停止標誌"""
     global should_stop
     should_stop = False
+
+def get_list_items(list_area):
+    """獲取列表項目"""
+    return list_area.descendants(control_type="ListItem")
 
 def get_list_area():
     try:
@@ -69,7 +74,7 @@ def get_list_area():
             try:
                 rect = list_area.rectangle()
                 # 檢查列表是否有內容
-                items = get_list_items(list_area)
+                items = get_list_items_by_id(list_area)
                 if items:
                     list_areas.append(rect)
                     debug_print(f"找到列表區域 {len(list_areas)}:")
