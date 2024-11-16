@@ -6,7 +6,7 @@ from datetime import datetime
 import time
 from utils import (debug_print, find_window_handle, ensure_foreground_window, 
                   get_list_items_by_id)
-from config import Config  # 添加這行
+from config import Config, COLORS  # 添加這行
 
 # 全域變數用於控制停止
 should_stop = False
@@ -42,7 +42,7 @@ def get_list_area():
             return None
 
         hwnd, window_title = target_windows[0]
-        debug_print(f"使用視窗: {window_title}")
+        debug_print(f"使用視窗: {window_title}", color='blue')
 
         if check_stop():
             debug_print("檢測已停止")
@@ -180,7 +180,7 @@ def list_all_controls():
         # 顯示所有控件的資訊
         for i, control in enumerate(all_controls, 1):
             try:
-                debug_print(f"\n控件 {i}:")
+                debug_print(f"控件 {i}:")
                 debug_print(f"類型: {control.element_info.control_type}, 類別: {type(control).__name__}")
                 debug_print(f"名稱: {control.window_text()}")
                 rect = control.rectangle()
@@ -214,7 +214,7 @@ def get_control_at_position(x, y, hwnd):
                 if (rect.left <= x <= rect.right and 
                     rect.top <= y <= rect.bottom):
                     # 找到包含點擊位置的控件
-                    debug_print("\n點擊的控件資訊:")
+                    debug_print("點擊的控件資訊:")
                     debug_print(f"類型: {control.element_info.control_type}, 類別: {type(control).__name__}")
                     debug_print(f"名稱: {control.window_text()}")
                     debug_print(f"位置: 左={rect.left}, 上={rect.top}, 右={rect.right}, 下={rect.bottom}")

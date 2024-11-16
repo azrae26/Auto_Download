@@ -20,7 +20,7 @@ from scheduler import Scheduler
 from font_size_setter import set_font_size
 from chrome_monitor import start_chrome_monitor
 from folder_monitor import start_folder_monitor, FolderMonitor
-from config import Config  # 添加這行
+from config import Config, COLORS  # 添加這行
 
 class WindowHandler:
     """處理窗口相關操作"""
@@ -121,7 +121,7 @@ class FileProcessor:
         if count <= 0:
             return
         
-        time.sleep(0.3)  # 等待視窗完全打開
+        time.sleep(Config.SLEEP_INTERVAL * 3)  # 等待視窗完全打開
         
         try:
             # 按下 CTRL
@@ -431,6 +431,17 @@ class MainApp:
             return
         
         hwnd, window_title = target_windows[0]
+        folder_monitor = FolderMonitor()
+        
+        # 確保每次執行時列表都是空的
+        collected_lists = {
+            '今日': [],
+            '昨日': [],
+            '上週': [],
+            '上上週': [],
+            '上上上週': [],
+            '上上上上週': []
+        }
         
         def press_left_or_up(left_times, up_times):
             """連續按左或上鍵指定次數"""
@@ -446,33 +457,59 @@ class MainApp:
                 pyautogui.press('up')
                 time.sleep(Config.SLEEP_INTERVAL)
         
-        def download_days_weeks(days_ago, weeks_ago):
-            """下載 N 天前、或 N 週前的檔案"""
-            if days_ago > 0 or weeks_ago > 0:  # 修改條件判斷
-                press_left_or_up(days_ago, weeks_ago) # 滾動到目標檔案
-            self.select_window(1) # 選擇視窗
+        def download_days_weeks(days_ago, weeks_ago, list_name=None):
+            """下載 N 天前、或 N 週前的檔案，並收集列表"""
+            if days_ago > 0 or weeks_ago > 0:
+                press_left_or_up(days_ago, weeks_ago)
+            
+            # 在下載前收集當前列表
+            if list_name and hwnd:
+                try:
+                    app = PywinautoApp(backend="uia").connect(handle=hwnd)
+                    main_window = app.window(handle=hwnd)
+                    # 清空當前時間點的列表，避免重複
+                    collected_lists[list_name] = []
+                    # 收集所有列表的檔案
+                    for list_type in ['morning', 'research', 'industry']:
+                        files = get_list_items_by_id(main_window, list_type)
+                        if files:  # 確保 files 不是 None
+                            collected_lists[list_name].extend([f.window_text() for f in files if f.window_text()])
+                    debug_print(
+                        f"已收集 {list_name} 列表，共 {len(collected_lists[list_name])} 個檔案", color='cyan')
+                except Exception as e:
+                    debug_print(f"收集列表時發生錯誤: {str(e)}", color='light_red')
+            
+            self.select_window(1)
         
         # 基本步驟
         steps = [
-            ("點擊每日報告標籤", lambda: self.click_daily_report_tab(hwnd, window_title)),  # 傳入已獲取的句柄
+            ("點擊每日報告標籤", lambda: self.click_daily_report_tab(hwnd, window_title)),
             ("設定字型大小", lambda: set_font_size()),
             ("點擊今日", lambda: start_calendar_checker(0)),
-            ("下載今日檔案", lambda: download_days_weeks(0, 0)),  # 下載今日檔案
+            ("下載今日檔案", lambda: download_days_weeks(0, 0, '今日')),
             ("點擊今日", lambda: start_calendar_checker(0)),
-            ("下載昨日檔案", lambda: download_days_weeks(1, 0)),  # 下載昨日檔案
-
+            ("下載昨日檔案", lambda: download_days_weeks(1, 0, '昨日')),
             ("點擊今日", lambda: start_calendar_checker(0)),
-            ("下載上週檔案", lambda: download_days_weeks(0, 1)),  # 下載上週檔案
+            ("下載上週檔案", lambda: download_days_weeks(0, 1, '上週')),
             ("點擊日歷空白處", lambda: start_click_calendar_blank()),
-            ("下載上週檔案", lambda: download_days_weeks(0, 1)),  # 下載上週檔案
+            ("下載上週檔案", lambda: download_days_weeks(0, 1, '上上週')),
             ("點擊日歷空白處", lambda: start_click_calendar_blank()),
-            ("下載上週檔案", lambda: download_days_weeks(0, 1)),  # 下載上週檔案
+            ("下載上週檔案", lambda: download_days_weeks(0, 1, '上上上週')),
             ("點擊日歷空白處", lambda: start_click_calendar_blank()),
-            ("下載上週檔案", lambda: download_days_weeks(0, 1)),  # 下載上週檔案
-
+            ("下載上週檔案", lambda: download_days_weeks(0, 1, '上上上上週')),
             ("點擊日歷空白處", lambda: start_click_calendar_blank()),
-            ("鍵盤向下X4", lambda: [pyautogui.press('down') for _ in range(4)]),
+            ("鍵盤向下 X4", lambda: [pyautogui.press('down') for _ in range(4)]),
+            ("點擊今日", lambda: start_calendar_checker(0)),
             ("複製今日檔案", lambda: self.copy_today_files()),
+            # 最後一步：分析檔案匹配
+            ("分析檔案匹配", lambda: folder_monitor.store_and_analyze_lists(
+                today_list=collected_lists['今日'],
+                yesterday_list=collected_lists['昨日'],
+                last_week_list=collected_lists['上週'],
+                last_2week_list=collected_lists['上上週'],
+                last_3week_list=collected_lists['上上上週'],
+                last_4week_list=collected_lists['上上上上週']
+            ))
         ]
         
         # 執行所有步驟
@@ -551,6 +588,71 @@ class MainApp:
         except Exception as e:
             debug_print(f"列出報告清單時發生錯誤: {str(e)}", color='light_red')
 
+    def collect_and_analyze_lists(self):
+        """收集各時間點列表並分析"""
+        debug_print("\n開始收集列表...", color='cyan')
+        
+        # 先獲取視窗句柄
+        target_windows = find_window_handle(Config.TARGET_WINDOW)
+        if not target_windows:
+            debug_print("錯誤: 找不到目標視窗", color='light_red')
+            return
+        
+        hwnd, window_title = target_windows[0]
+        folder_monitor = FolderMonitor()
+        collected_lists = {
+            '今日': [], '昨日': [], '上週': [],
+            '上上週': [], '上上上週': [], '上上上上週': []
+        }
+        
+        def collect_current_list(list_name):
+            """收集當前列表"""
+            try:
+                app = PywinautoApp(backend="uia").connect(handle=hwnd)
+                main_window = app.window(handle=hwnd)
+                collected_lists[list_name] = []
+                for list_type in ['morning', 'research', 'industry']:
+                    files = get_list_items_by_id(main_window, list_type)
+                    if files:
+                        collected_lists[list_name].extend([f.window_text() for f in files if f.window_text()])
+                debug_print(f"已收集 {list_name} 列表: {len(collected_lists[list_name])} 個檔案", color='green')
+            except Exception as e:
+                debug_print(f"收集列表時發生錯誤: {str(e)}", color='light_red')
+        
+        # 執行步驟
+        steps = [
+            ("點擊今日", lambda: start_calendar_checker(0)),
+            ("收集今日列表", lambda: collect_current_list('今日')),
+            ("向左一天", lambda: pyautogui.press('left')),
+            ("收集昨日列表", lambda: collect_current_list('昨日')),
+            ("點擊今日", lambda: start_calendar_checker(0)),
+            ("向上一週", lambda: pyautogui.press('up')),
+            ("收集上週列表", lambda: collect_current_list('上週')),
+            ("向上一週", lambda: pyautogui.press('up')),
+            ("收集上上週列表", lambda: collect_current_list('上上週')),
+            ("向上一週", lambda: pyautogui.press('up')),
+            ("收集上上上週列表", lambda: collect_current_list('上上上週')),
+            ("向上一週", lambda: pyautogui.press('up')),
+            ("收集上上上上週列表", lambda: collect_current_list('上上上上週')),
+            ("鍵盤向下 X4", lambda: [pyautogui.press('down') for _ in range(4)]),
+            ("點擊今日", lambda: start_calendar_checker(0)),
+        ]
+        
+        # 執行步驟
+        for step_name, step_func in steps:
+            debug_print(f"執行: {step_name}", color='yellow')
+            step_func()
+        
+        # 分析結果
+        folder_monitor.store_and_analyze_lists(
+            today_list=collected_lists['今日'],
+            yesterday_list=collected_lists['昨日'],
+            last_week_list=collected_lists['上週'],
+            last_2week_list=collected_lists['上上週'],
+            last_3week_list=collected_lists['上上上週'],
+            last_4week_list=collected_lists['上上上上週']
+        )
+
     def run(self):
         try:
             debug_print("=== 研究報告自動下載程式 ===", color='light_blue')
@@ -565,8 +667,9 @@ class MainApp:
             keyboard.add_hotkey('ctrl+shift+m', monitor_clicks)
             keyboard.add_hotkey('ctrl+shift+k', self.monitor_chrome)
             keyboard.add_hotkey('ctrl+shift+f12', self.copy_today_files)
-            keyboard.add_hotkey('ctrl+shift+f11', self.list_all_reports)  # 添加新的快捷鍵
-
+            keyboard.add_hotkey('ctrl+shift+f11', self.list_all_reports)
+            keyboard.add_hotkey('ctrl+shift+f10', self.collect_and_analyze_lists)  # 新增這行
+            
             # 顯示熱鍵說明
             debug_print("=== 快捷鍵說明 ===", color='cyan')
             debug_print("按下 CTRL + SHIFT + E    開始連續下載任務", color='green')
@@ -579,6 +682,7 @@ class MainApp:
             debug_print("按下 CTRL + SHIFT + K    監控 Chrome 視窗", color='green')
             debug_print("按下 CTRL + SHIFT + F11  列出所有報告清單", color='green')
             debug_print("按下 CTRL + SHIFT + F12  複製今日所有新檔案", color='green')
+            debug_print("按下 CTRL + SHIFT + F10  收集並分析所有列表", color='green')
             debug_print("按下 ESC                 停止下載", color='yellow')
             debug_print("按下 CTRL+SHIFT+Q        關閉程式", color='red')
             debug_print("==================", color='cyan')

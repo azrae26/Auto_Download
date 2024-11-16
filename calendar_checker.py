@@ -5,7 +5,8 @@ import pyautogui
 import time
 from utils import (debug_print, find_window_handle, ensure_foreground_window, 
                   calculate_center_position)
-from config import Config
+from config import Config, COLORS
+from control_info import get_calendar_info
 
 class CalendarChecker:
     """日曆檢查器類"""
@@ -38,35 +39,80 @@ class CalendarChecker:
         try:
             app = Application(backend="uia").connect(handle=self.hwnd)
             main_window = app.window(handle=self.hwnd)
-            self.calendar = main_window.child_window(
-                class_name="WindowsForms10.SysMonthCal32.app.0.32f6d92_r8_ad1"
+            
+            # 使用 control_info.py 中定義的日曆控件資訊
+            calendar_info = get_calendar_info()
+            
+            # 先找到所有符合條件的控件
+            candidates = main_window.descendants(
+                class_name=calendar_info['class_name'],
+                control_type=calendar_info['element_info']['control_type']
             )
-            return self.calendar.exists()
+            
+            debug_print(f"找到 {len(candidates)} 個候選控件", color='cyan')
+            
+            # 遍歷所有候選控件，找到正確的日曆控件
+            for candidate in candidates:
+                try:
+                    rect = candidate.rectangle()
+                    width = rect.right - rect.left
+                    height = rect.bottom - rect.top
+                    
+                    # 檢查尺寸是否符合（允許5像素的誤差）
+                    if (abs(width - 186) <= 5 and abs(height - 162) <= 5):
+                        debug_print(f"檢查控件:", color='cyan')
+                        debug_print(f"寬度: {width}, 高度: {height}", color='cyan')
+                        debug_print(f"類型: {candidate.element_info.control_type}", color='cyan')
+                        debug_print(f"類別: {type(candidate).__name__}", color='cyan')
+                        debug_print(f"類別名稱: {candidate.class_name()}", color='cyan')
+                        
+                        # 找到符合的控件
+                        self.calendar = candidate
+                        debug_print("找到符合的日曆控件!", color='green')
+                        return True
+                        
+                except Exception as e:
+                    continue
+            
+            debug_print("無法找到符合尺寸的日曆控件", color='light_red')
+            return False
+            
         except Exception as e:
-            debug_print(f"尋找日曆元素時發生錯誤: {str(e)}")
+            debug_print(f"尋找日曆元素時發生錯誤: {str(e)}", color='light_red')
             return False
 
-    def calculate_click_position(self, days_ago): # self意思是CalendarChecker類的實例
+    def calculate_click_position(self, days_ago):
         """計算點擊位置"""
-        rect = self.calendar.rectangle() # 獲取日歷元素的矩形範圍
-        today = datetime.now() # 獲取今日日期
+        rect = self.calendar.rectangle()  # 獲取日歷元素的矩形範圍
+        today = datetime.now()  # 獲取今日日期
         
-        # 計算網格尺寸
-        cell_width = (rect.right - rect.left) / self.GRID_COLS # 計算每個單元格的寬度
-        cell_height = (rect.bottom - rect.top - self.HEADER_HEIGHT - self.WEEKDAY_HEIGHT) / self.GRID_ROWS
+        # 日期區域的高度（扣除標題區域）
+        date_area_height = rect.bottom - rect.top - 52  # 扣除52px的標題區域
+        
+        # 計算網格尺寸（確保只有6行）
+        cell_width = (rect.right - rect.left) / self.GRID_COLS  # 計算每個單元格的寬度
+        cell_height = date_area_height / 6  # 日期區域平均分成6行
         
         # 計算日期位置
-        first_day = today.replace(day=1) # 計算當月第一天
-        first_day_col = (first_day.weekday() + 1) % 7 # 計算當月第一天是星期幾
-        days_from_start = today.day - days_ago - 1 # 計算從當月第一天到今天的天數
-        total_position = first_day_col + days_from_start # 計算總位置
+        first_day = today.replace(day=1)  # 計算當月第一天
+        first_day_col = (first_day.weekday() + 1) % 7  # 計算當月第一天是星期幾
+        days_from_start = today.day - days_ago - 1  # 計算從當月第一天到今天的天數
+        total_position = first_day_col + days_from_start  # 計算總位置
         
         # 計算目標座標
-        target_row = total_position // 7 # 計算目標行
-        target_col = total_position % 7 # 計算目標列
+        target_row = total_position // 7  # 計算目標行（0-5）
+        target_col = total_position % 7  # 計算目標列（0-6）
         
-        x = rect.left + (target_col + 0.5) * cell_width # 計算目標點的x座標
-        y = rect.top + self.HEADER_HEIGHT + self.WEEKDAY_HEIGHT + (target_row + 0.5) * cell_height # 計算目標點的y座標
+        # 計算最終座標
+        x = rect.left + (target_col + 0.5) * cell_width  # x座標（列中心）
+        y = rect.top + 52 + (target_row + 0.5) * cell_height  # y座標（從標題區域下方開始）
+        
+        debug_print(f"日曆區域: 左={rect.left}, 上={rect.top}, 右={rect.right}, 下={rect.bottom}", color='cyan')
+        debug_print(f"日歷尺寸: 寬={rect.right - rect.left}px, 高={rect.bottom - rect.top}px", color='cyan')
+        debug_print(f"日期區高度: {date_area_height}px, 寬度: {rect.right - rect.left}px", color='cyan')
+        debug_print(f"單元格尺寸: 寬={cell_width:.1f}px, 高={cell_height:.1f}px", color='cyan')
+        debug_print(f"目標位置: 第{target_row + 1}行, 第{target_col + 1}列", color='cyan')
+        debug_print(f"點擊座標: x={int(x)}, y={int(y)}", color='cyan')
         
         return int(x), int(y)
 
@@ -156,6 +202,7 @@ def start_calendar_checker(days_ago=0):
             hwnd = target_windows[0][0]
             window_title = target_windows[0][1]
             
+            # 初始化 CalendarChecker 實例
             checker = CalendarChecker()
             if not checker.find_window():
                 return False
@@ -164,11 +211,14 @@ def start_calendar_checker(days_ago=0):
                 debug_print("警告: 無法確保視窗在前景")
                 return False
             
+            # 找到日歷元素
             if not checker.find_calendar():
                 debug_print("無法找到日歷元素")
                 return False
             
             debug_print("找到日歷元素!", color='blue')
+
+            # 點擊日期
             if checker.click_date(days_ago):
                 try:
                     debug_print(f"日歷可見性: {checker.calendar.is_visible()}", color='blue')

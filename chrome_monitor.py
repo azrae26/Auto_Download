@@ -3,7 +3,7 @@ import time
 import win32gui
 import threading
 from utils import debug_print
-from config import Config
+from config import Config, COLORS
 
 class ChromeMonitor:
     def __init__(self):

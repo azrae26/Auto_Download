@@ -6,46 +6,7 @@ import time
 from pywinauto.application import Application as PywinautoApp
 import win32api
 import pyautogui
-from colorama import init, Fore, Back, Style
-from config import Config  # 添加這行
-
-# 初始化 colorama
-init()
-
-# 顏色映射
-COLORS = {
-    # 文字顏色
-    'red': Fore.RED,                      # 錯誤訊息，紅色
-    'orange': Fore.LIGHTRED_EX,           # 橘色
-    'green': Fore.GREEN,                  # 成功訊息，綠色
-    'yellow': Fore.YELLOW,                # 操作訊息，黃色
-    'blue': Fore.BLUE,                    # 一般資訊，藍色
-    'magenta': Fore.MAGENTA,              # 檢測訊息，洋紅色
-    'cyan': Fore.CYAN,                    # 標題，青色
-    'light_red': Fore.LIGHTRED_EX,        # 亮紅色
-    'light_green': Fore.LIGHTGREEN_EX,    # 亮綠色
-    'light_yellow': Fore.LIGHTYELLOW_EX,  # 亮黃色
-    'light_blue': Fore.LIGHTBLUE_EX,      # 亮藍色
-    'light_magenta': Fore.LIGHTMAGENTA_EX,# 亮洋紅色
-    'light_cyan': Fore.LIGHTCYAN_EX,      # 亮青色
-    'light_white': Fore.LIGHTWHITE_EX,    # 亮白色
-    'dark_grey': Fore.LIGHTBLACK_EX,      # 深灰色
-    'reset': Style.RESET_ALL,             # 重置顏色
-    # 背景顏色
-    'bg_red': Back.RED,                   # 紅色背景
-    'bg_green': Back.GREEN,               # 綠色背景
-    'bg_yellow': Back.YELLOW,             # 黃色背景
-    'bg_blue': Back.BLUE,                 # 藍色背景
-    'bg_magenta': Back.MAGENTA,           # 洋紅色背景
-    'bg_cyan': Back.CYAN,                 # 青色背景
-    'bg_white': Back.WHITE,               # 白色背景
-    'bg_reset': Back.RESET,               # 重置背景
-    # 樣式
-    'bold': Style.BRIGHT,                  # 粗體
-    'dim': Style.DIM,                      # 暗淡
-    'normal': Style.NORMAL,                # 正常
-    'reset': Style.RESET_ALL,              # 重置樣式
-}
+from config import Config, COLORS  # 添加這行
 
 # 全域常數
 SLEEP_INTERVAL = Config.SLEEP_INTERVAL  # 基本等待時間
@@ -59,9 +20,9 @@ is_program_moving = False
 def debug_print(message, color='white', bg_color=None):
     """帶時間戳和顏色的輸出函數"""
     timestamp = datetime.now().strftime('[%Y-%m-%d %H:%M:%S]')
-    color_code = COLORS.get(color, Fore.WHITE)
+    color_code = COLORS.get(color, COLORS['reset'])
     bg_code = COLORS.get(bg_color, '') if bg_color else ''
-    print(f"{timestamp} {color_code}{bg_code}{message}{Style.RESET_ALL}")
+    print(f"{timestamp} {color_code}{bg_code}{message}{COLORS['reset']}")
 
 def find_window_handle(target_title=None):
     """
@@ -189,9 +150,7 @@ def calculate_center_position(rect):
             return None, None
             
         center_x = (rect.left + rect.right) // 2
-        debug_print(f"計算中心點位置: {center_x}", color='blue')
         center_y = (rect.top + rect.bottom) // 2
-        debug_print(f"計算中心點位置: {center_y}", color='blue')
         
         if not isinstance(center_x, (int, float)) or not isinstance(center_y, (int, float)):
             debug_print("錯誤: 計算結果無效", color='light_red')
@@ -390,7 +349,7 @@ def click_at(x, y, is_first_click=False, clicks=1, interval=SLEEP_INTERVAL, slee
                 
                 if success:
                     # 點擊後等待時間，第一次點擊等待時間
-                    time.sleep(sleep_interval or (interval * (5 if is_first_click else 2)))
+                    time.sleep(sleep_interval or (interval * (5 if is_first_click else 0.5)))
                     return True
                 else:
                     retry_count += 1
@@ -443,7 +402,7 @@ def scroll_to_file(file, list_area, hwnd):
                 target_list = list_type
                 target_index = index
                 target_list_id = list_id
-                debug_print(f"目標檔案在{list_type}列表，序號: {index}", color='blue')
+                debug_print(f"目標檔案在 [{list_type}] 列表，序號: {index}", color='blue')
                 break
             except ValueError:
                 continue
@@ -463,7 +422,7 @@ def scroll_to_file(file, list_area, hwnd):
                 if f.is_selected():
                     current_list = list_type
                     current_index = i
-                    debug_print(f"游標選中的檔案在{list_type}列表，序號: {i}", color='blue')
+                    debug_print(f"游標選中的檔案在 [{list_type}] 列表，序號: {i}", color='blue')
                     break
             if current_index is not None:
                 break
@@ -480,7 +439,7 @@ def scroll_to_file(file, list_area, hwnd):
                 list_type = 'industry'
                 
             if list_type:
-                debug_print(f"嘗試點擊{target_list}列表", color='yellow')
+                debug_print(f"嘗試點擊 [{target_list}] 列表", color='yellow')
                 # 點擊切換到目標檔案所在的列表
                 if not switch_to_list(hwnd, list_type, next_list=False):
                     debug_print("切換到目標列表失敗", color='light_red')
@@ -505,7 +464,7 @@ def scroll_to_file(file, list_area, hwnd):
                 
         # 檢查是否需要切換列表
         if target_list != current_list:
-            debug_print(f"需要從{current_list}切換到{target_list}", color='blue')
+            debug_print(f"需要從 [{current_list}] 切換到 [{target_list}]", color='blue')
             # 切換列表時傳入視窗標題
             if not switch_to_list(hwnd):
                 return False
@@ -524,12 +483,28 @@ def scroll_to_file(file, list_area, hwnd):
         max_attempts = 10
         attempts = 0
         
+        # 在開始翻頁前，確保目標列表被選中
+        list_type = None
+        if target_list == '晨會報告':
+            list_type = 'morning'
+        elif target_list == '研究報告':
+            list_type = 'research'
+        elif target_list == '產業報告':
+            list_type = 'industry'
+            
+        if list_type:
+            debug_print(f"翻頁前確保 [{target_list}] 列表被選中", color='blue')
+            if not switch_to_list(hwnd, list_type, next_list=False):
+                debug_print("切換到目標列表失敗", color='light_red')
+                return False
+            time.sleep(0.1)  # 等待列表切換完成
+        
         # 執行翻頁直到找到檔案
         while attempts < max_attempts:
             if is_file_visible(file, list_area):
                 debug_print("目標檔案已可見", color='green')
                 return True
-            
+                
             # 確保視窗在前景
             if not ensure_foreground_window(hwnd, window_title):
                 debug_print("視窗不在前景，重新嘗試滾動", color='light_red')
@@ -544,7 +519,13 @@ def scroll_to_file(file, list_area, hwnd):
                 debug_print("目標檔案在下方，向下翻頁", color='yellow')
                 pyautogui.press('pagedown')
                 
-            time.sleep(0.5)
+            time.sleep(0.2)
+            
+            # 檢查檔案是否可見
+            if is_file_visible(file, list_area):
+                debug_print("翻頁後檔案已可見", color='green')
+                return True
+                
             attempts += 1
             
         debug_print(f"已達最大嘗試次數 {max_attempts}，無法找到目標檔案", color='light_red')
@@ -564,21 +545,15 @@ def is_file_visible(file, list_area):
         # 檢查檔案頂部是否在可視範圍內
         top_visible = file_rect.top >= list_rect.top
         
-        # 檢查檔案底部是否在可視範圍內（加上5像素的緩衝）
-        bottom_visible = file_rect.bottom <= list_rect.bottom + 5
-        
-        # 檢查檔案是否在列表的水平範圍內
-        horizontal_visible = (file_rect.left >= list_rect.left and 
-                            file_rect.right <= list_rect.right)
+        # 檢查檔案底部是否在可視範圍內
+        bottom_visible = file_rect.bottom <= list_rect.bottom
         
         # 檢查檔案是否可見
-        is_visible = top_visible and bottom_visible and horizontal_visible
+        is_visible = top_visible and bottom_visible
 
         file_name = file.window_text()
         
-        if is_visible:
-            debug_print(f"{file_name} 檔案在可視範圍內 (top={file_rect.top}, bottom={file_rect.bottom})", color='green')
-        else:
+        if not is_visible:
             debug_print(f"{file_name} 檔案不在可視範圍內 (top={file_rect.top}, bottom={file_rect.bottom})", color='magenta')
             debug_print(f"列表範圍: top={list_rect.top}, bottom={list_rect.bottom}", color='magenta')
             
@@ -590,7 +565,7 @@ def is_file_visible(file, list_area):
 
 def switch_to_list(hwnd, list_type=None, next_list=True):
     """
-    切換到指定列表或下一個列表
+    點擊切換到指定列表或下一個列表
     hwnd: 視窗句柄
     list_type: 'morning'|'research'|'industry' 指定要切換到哪個列表
     next_list: True=切換到下一個列表, False=切換到指定列表
@@ -642,7 +617,7 @@ def switch_to_list(hwnd, list_type=None, next_list=True):
                 center_x, 
                 click_y, 
                 clicks=1, 
-                sleep_interval=SLEEP_INTERVAL,
+                sleep_interval=SLEEP_INTERVAL * 0.2,
                 hwnd=hwnd, 
                 window_title=win32gui.GetWindowText(hwnd)
             )
