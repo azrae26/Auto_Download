@@ -158,81 +158,91 @@ class FileProcessor:
             # 連接到視窗
             main_window = app.window(handle=hwnd)
             
-            # 獲取每個列表區域的檔案
-            all_files = []
-            valid_areas = []  # 儲存有效的列表區域
-            
-            # 使用正確的列表類型標識符
-            list_types = [
-                ('morning', '晨會報告'),
-                ('research', '研究報告'),
-                ('industry', '產業報告')
-            ]
-            
-            # 直接從 main_window 獲取列表區域
-            for list_type, list_name in list_types:
-                debug_print(f"獲取 [{list_name}] 檔案...", color='cyan')
-                # 獲取檔案
-                files = get_list_items_by_id(main_window, list_type)
-                if files:
-                    # 計算檔案數量，_公司 不計算
-                    file_count = len([f for f in files if not f.window_text().endswith("_公司")])
-                    # 確保有可下載的檔案
-                    if file_count > 0:
-                        # 獲取列表區域
-                        list_area = main_window.child_window(auto_id=f"listBox{list_type.capitalize()}Reports")
-                        valid_areas.append(list_area)  # 儲存有效的列表區域
-                        
-                        valid_files = [
-                            (file, len(valid_areas) - 1) for file in files 
-                            if not file.window_text().endswith("_公司")
-                        ]
-                        all_files.extend(valid_files)
-                        debug_print(f"[{list_name}] 檔案數量: {file_count}", color='white')
-                    else:
-                        debug_print(f"[{list_name}] 沒有可下載的檔案", color='yellow')
-                else:
-                    debug_print(f"[{list_name}] 是空白的，跳過", color='yellow')
-
-            if not all_files:
-                debug_print("警告: 沒有找到可下載的檔案", color='light_red')
-                return
-
-            debug_print(f"總共找到 {len(all_files)} 個可下載檔案", color='green')
-            
-            # 下載檔案，初始化
+            # 初始化全域的已下載檔案集合
+            downloaded_files = set()
             is_first_click = True
             click_count = 0
-            downloaded_files = set()
+            current_list_index = 0  # 添加：追蹤當前列表索引
+            
+            while True:
+                # 重置列表位置到第一個列表（如果不是第一次循環）
+                if current_list_index > 0:
+                    debug_print("重置列表位置到第一個列表", color='cyan')
+                    for _ in range(current_list_index):
+                        switch_to_list(hwnd)
+                    current_list_index = 0
+                
+                # 獲取當前所有檔案（不含已下載的）
+                all_files = []
+                valid_areas = []  # 儲存有效的列表區域
+                
+                # 使用正確的列表類型標識符
+                list_types = [
+                    ('morning', '晨會報告'),
+                    ('research', '研究報告'),
+                    ('industry', '產業報告')
+                ]
+                
+                # 獲取所有未下載的檔案
+                for list_type, list_name in list_types:
+                    debug_print(f"獲取 [{list_name}] 檔案...", color='cyan')
+                    files = get_list_items_by_id(main_window, list_type)
+                    if files:
+                        # 獲取列表區域
+                        list_area = main_window.child_window(auto_id=f"listBox{list_type.capitalize()}Reports")
+                        valid_areas.append(list_area)
+                        
+                        # 只收集未下載的檔案
+                        valid_files = [
+                            (file, len(valid_areas) - 1) 
+                            for file in files 
+                            if not file.window_text().endswith("_公司") and 
+                               file.window_text() not in downloaded_files
+                        ]
+                        
+                        if valid_files:
+                            all_files.extend(valid_files)
+                            debug_print(f"[{list_name}] 找到 {len(valid_files)} 個未下載檔案", color='white')
+                        else:
+                            debug_print(f"[{list_name}] 沒有新的檔案需要下載", color='yellow')
 
-            for file,area_index in missed_files:
-                if should_stop_callback():
-                    return
+                if not all_files:
+                    debug_print("所有檔案已下載完成", color='green')
+                    break
+
+                debug_print(f"本輪需要下載 {len(all_files)} 個檔案", color='green')
+
                 # 下載檔案
                 for file, area_index in all_files:
                     if should_stop_callback(): 
                         return
 
                     try:
-                        # 獲取檔案名稱
                         file_name = file.window_text()
-                        if file_name in downloaded_files:
-                            continue
-
-                        # 使用對應的有效列表區域，如果不在可視範圍內，嘗試調整位置
                         list_area = valid_areas[area_index]
+                        
+                        # 如果需要切換到不同的列表
+                        if area_index != current_list_index:
+                            debug_print(f"切換列表: 從 {current_list_index} 到 {area_index}", color='cyan')
+                            for _ in range(area_index - current_list_index):
+                                switch_to_list(hwnd)
+                            current_list_index = area_index
+                            time.sleep(Config.SLEEP_INTERVAL * 2)  # 等待列表切換完成
+                        
+                        # 檢查檔案可見性
                         if not is_file_visible(file, list_area):
                             debug_print(f"檔案 '{file_name}' 不在可視範圍內，嘗試調整位置", color='magenta')
                             if not scroll_to_file(file, list_area, hwnd):
                                 debug_print(f"無法使檔案 '{file_name}' 進入可視範圍，跳過")
                                 continue
-
+                        
                         # 執行點擊
                         rect = file.rectangle()
                         center_x, center_y = calculate_center_position(rect)
                         if center_x is None or center_y is None:
                             debug_print("無法計算檔案位置，跳過此檔案")
                             continue
+                        
                         click_at(
                             center_x, 
                             center_y, 
@@ -245,10 +255,8 @@ class FileProcessor:
                         )
                         debug_print(f"下載完成: {file_name}", color='white')
                         
-                        # 如果不是第一次點擊，計算點擊次數
                         if not is_first_click:
                             click_count += 1
-                            # 如果達到指定數量，關閉chrome分頁
                             if click_count == Config.CLICK_BATCH_SIZE:
                                 self.close_windows(Config.CLICK_BATCH_SIZE)
                                 click_count = 0
@@ -256,50 +264,45 @@ class FileProcessor:
                             is_first_click = False
                             time.sleep(Config.SLEEP_INTERVAL * 5)
 
-                        # 下載的檔案清單
                         downloaded_files.add(file_name)
                         
-                        # 如果是當前列表的最後一個檔案，切換到下一個列表，除非是最後一個列表
                         if self.is_last_file_in_list(file, area_index, all_files):
                             if area_index == len(valid_areas) - 1:
                                 debug_print(f"已經是最後一個列表，跳過切換", color='yellow')
                             else:
                                 debug_print(f"切換到下一個列表", color='cyan')
-                                debug_print(f"開始切換列表: 點擊左鍵", color='yellow')
                                 switch_to_list(hwnd)
+                                current_list_index += 1  # 更新當前列表索引
 
                     except Exception as e:
                         debug_print(f"處理檔案時發生錯誤: {str(e)}", color='light_red')
                         continue
 
-                # 如果還有未關閉的chrome分頁，關閉
+                # 關閉剩餘的Chrome視窗
                 if click_count > 0:
                     self.close_windows(click_count)
 
                 # 檢查是否有漏掉的檔案
                 debug_print("檢查是否有漏掉的檔案...", color='cyan')
                 
-                # 獲取所有新檔案（不含_公司）
-                new_files = set()
+                # 獲取所有檔案（不含_公司）
+                current_files = set()
                 for list_type, _ in list_types:
                     files = get_list_items_by_id(main_window, list_type)
-                    new_files.update(
+                    current_files.update(
                         file.window_text() for file in files 
                         if not file.window_text().endswith("_公司")
                     )
 
-            # 找出漏掉的檔案
-            missed_files = new_files - downloaded_files
+                # 找出漏掉的檔案
+                missed_files = current_files - downloaded_files
 
-            if missed_files:
-                debug_print(f"發現 {len(missed_files)} 個漏掉的檔案，開始下載...", color='cyan')
-                self.download_missed_files(
-                    app=app,
-                    missed_files=missed_files, 
-                    main_window=main_window,
-                    hwnd=hwnd,  # 加入 hwnd 參數
-                    should_stop_callback=should_stop_callback  # 加入 should_stop_callback 參數
-                )
+                if not missed_files:  # 如果沒有漏掉的檔案，跳出循環
+                    debug_print("沒有漏掉的檔案，下載完成", color='green')
+                    break
+                else:
+                    debug_print(f"發現 {len(missed_files)} 個漏掉的檔案，繼續下載...", color='cyan')
+                    # 下一輪循環將只處理漏掉的檔案
 
             debug_print("所有檔案下載完成", color='green')
 
@@ -321,114 +324,6 @@ class FileProcessor:
             files = get_list_items_by_id(main_window, i)
             all_files.extend([(file, i) for file in files if not file.window_text().endswith("_公司")])
         return all_files
-
-    def download_missed_files(self, app, missed_files, main_window, hwnd, should_stop_callback):
-        """下載漏掉的檔案"""
-        click_count = 0  # 初始化 click_count
-        
-        try:
-            if should_stop_callback():
-                debug_print("[DEBUG] 下載開始前檢測到停止信號", color='yellow')
-                return
-
-            window_title = win32gui.GetWindowText(hwnd)  # 獲取視窗標題
-            if not ensure_foreground_window(hwnd, window_title):
-                debug_print("錯誤: 無法確保視窗可見", color='light_red')
-                return
-
-            # 連接到視窗
-            main_window = app.window(handle=hwnd)
-            
-            # 獲取每個列表區域的檔案
-            all_files = []
-            valid_areas = []  # 儲存有效的列表區域
-            
-            # 使用正確的列表類型標識符
-            list_types = [
-                ('morning', '晨會報告'),
-                ('research', '研究報告'),
-                ('industry', '產業報告')
-            ]
-        
-            # 獲取所有列表的檔案和區域
-            for list_type, list_name in list_types:
-                debug_print(f"獲取 [{list_name}] 檔案...", color='cyan')
-                files = get_list_items_by_id(main_window, list_type)
-                if files:
-                    # 獲取列表區域
-                    list_area = main_window.child_window(auto_id=f"listBox{list_type.capitalize()}Reports")
-                    valid_areas.append(list_area)
-                    
-                    # 只收集漏掉的檔案
-                    valid_files = [
-                        (file, len(valid_areas) - 1) 
-                        for file in files 
-                        if file.window_text() in missed_files
-                    ]
-                    if valid_files:
-                        debug_print(f"[{list_name}] 找到 {len(valid_files)} 個漏掉的檔案", color='cyan')
-                        all_files.extend(valid_files)
-        
-            # 下載檔案
-            for file, area_index in all_files:
-                if should_stop_callback(): 
-                    return
-
-                try:
-                    file_name = file.window_text()
-                    debug_print(f"正在下載漏掉的檔案: {file_name}", color='cyan')
-                    
-                    # 使用對應的有效列表區域
-                    list_area = valid_areas[area_index]
-                    if not is_file_visible(file, list_area):
-                        debug_print(f"檔案 '{file_name}' 不在可視範圍內，嘗試調整位置", color='magenta')
-                        if not scroll_to_file(file, list_area, hwnd):
-                            debug_print(f"無法使檔案 '{file_name}' 進入可視範圍，跳過")
-                            continue
-                    
-                    # 執行點擊
-                    rect = file.rectangle()
-                    center_x, center_y = calculate_center_position(rect)
-                    if center_x is None or center_y is None:
-                        debug_print("無法計算檔案位置，跳過此檔案")
-                        continue
-                    
-                    click_at(
-                        x=center_x, 
-                        y=center_y, 
-                        is_first_click=False,
-                        clicks=2,
-                        interval=Config.SLEEP_INTERVAL,
-                        hwnd=hwnd,
-                        window_title=window_title,
-                        expected_text=file_name
-                    )
-                    debug_print(f"下載完成: {file_name}", color='green')
-                    click_count += 1
-                    
-                    if click_count == Config.CLICK_BATCH_SIZE:
-                        self.close_windows(Config.CLICK_BATCH_SIZE)
-                        click_count = 0
-                    
-                    # 如果是當前列表的最後一個檔案，切換到下一個列表，除非是最後一個列表
-                    if self.is_last_file_in_list(file, area_index, all_files):
-                        if area_index == len(valid_areas) - 1:
-                            debug_print(f"已經是最後一個列表，跳過切換", color='yellow')
-                        else:
-                            debug_print(f"切換到下一個列表", color='cyan')
-                            debug_print(f"開始切換列表: 點擊左鍵", color='yellow')
-                            switch_to_list(hwnd)
-                
-                except Exception as e:
-                    debug_print(f"下載漏掉的檔案時發生錯誤: {str(e)}", color='light_red')
-                    continue
-            
-            # 關閉剩餘視窗
-            if click_count > 0:
-                self.close_windows(click_count)
-            
-        except Exception as e:
-            debug_print(f"下載漏掉的檔案過程中發生錯誤: {str(e)}", color='light_red')
 
 class MainApp:
     """主應用程序類"""
