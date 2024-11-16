@@ -573,11 +573,13 @@ def is_file_visible(file, list_area):
         
         # 檢查檔案是否可見
         is_visible = top_visible and bottom_visible and horizontal_visible
+
+        file_name = file.window_text()
         
         if is_visible:
-            debug_print(f"檔案在可視範圍內 (top={file_rect.top}, bottom={file_rect.bottom})", color='green')
+            debug_print(f"{file_name} 檔案在可視範圍內 (top={file_rect.top}, bottom={file_rect.bottom})", color='green')
         else:
-            debug_print(f"檔案不在可視範圍內 (top={file_rect.top}, bottom={file_rect.bottom})", color='magenta')
+            debug_print(f"{file_name} 檔案不在可視範圍內 (top={file_rect.top}, bottom={file_rect.bottom})", color='magenta')
             debug_print(f"列表範圍: top={list_rect.top}, bottom={list_rect.bottom}", color='magenta')
             
         return is_visible
