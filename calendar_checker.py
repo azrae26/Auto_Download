@@ -72,6 +72,8 @@ class CalendarChecker:
 
     def click_date(self, days_ago):
         """點擊某日日期"""
+        global is_program_moving  # 添加這行
+        
         try:
             rect = self.calendar.rectangle() # 獲取日歷元素的矩形範圍
             x, y = self.calculate_click_position(days_ago) # 計算點擊位置
@@ -79,23 +81,33 @@ class CalendarChecker:
                 debug_print("無法計算點擊位置")
                 return False
                 
-            debug_print(f"今天是 {datetime.now().day} 號") # 印出今日日期
-            debug_print(f"計算得出的點擊位置: x={x}, y={y}") # 印出計算得出的點擊位置
+            debug_print(f"今天是 {datetime.now().day} 號", color='blue') # 印出今日日期
+            debug_print(f"計算得出的點擊位置: x={x}, y={y}", color='blue') # 印出計算得出的點擊位置
             
-            # 執行三次點擊
-            for _ in range(3):
-                pyautogui.click(x, y)
-                time.sleep(self.CLICK_DELAY)
+            # 標記為程式移動
+            is_program_moving = True
             
-            debug_print("已執行三次點擊")
-            return True
-            
+            try:
+                # 執行三次點擊
+                for _ in range(3):
+                    pyautogui.click(x, y)
+                    time.sleep(self.CLICK_DELAY)
+                
+                debug_print("已執行三次點擊", color='yellow')
+                return True
+                
+            finally:
+                is_program_moving = False  # 確保標記被重置
+                
         except Exception as e:
             debug_print(f"點擊日期時發生錯誤: {str(e)}")
+            is_program_moving = False  # 確保發生錯誤時重設標記
             return False
     
     def click_calendar_blank(self):
         """點擊日歷空白處"""
+        global is_program_moving  # 添加這行
+        
         try:
             rect = self.calendar.rectangle() # 獲取日歷元素的矩形範圍
             
@@ -103,63 +115,81 @@ class CalendarChecker:
             x = rect.left + 140 # 右邊界向右140像素
             y = rect.top + 10 # 上邊界向下10像素
             
-            # 執行點擊 2 次
-            pyautogui.click(x, y)
-            time.sleep(self.CLICK_DELAY)
-            pyautogui.click(x, y)
-            time.sleep(self.CLICK_DELAY)
+            # 標記為程式移動
+            is_program_moving = True
             
-            debug_print("已點擊日歷空白處")
-            return True
-            
+            try:
+                # 執行點擊 2 次
+                pyautogui.click(x, y)
+                time.sleep(self.CLICK_DELAY)
+                pyautogui.click(x, y)
+                time.sleep(self.CLICK_DELAY)
+                
+                debug_print("已點擊日歷空白處", color='yellow')
+                return True
+                
+            finally:
+                is_program_moving = False  # 確保標記被重置
+                
         except Exception as e:
             debug_print(f"點擊日歷空白處時發生錯誤: {str(e)}")
+            is_program_moving = False  # 確保發生錯誤時重設標記
             return False
 
 def start_calendar_checker(days_ago=0):
     """開始檢測日歷元素並點選日期"""
+    global is_program_moving  # 添加這行
+    
     try:
-        debug_print("開始檢測日歷元素並點選今日日期...", color='yellow')
+        debug_print("開始檢測日歷元素並點選今日日期...", color='cyan')
         
-        # 獲取目標視窗
-        target_windows = find_window_handle(Config.TARGET_WINDOW)  # 使用 Config.TARGET_WINDOW
-        if not target_windows:
-            debug_print("找不到目標視窗", color='light_red')
+        # 標記為程式移動
+        is_program_moving = True
+        
+        try:
+            # 獲取目標視窗
+            target_windows = find_window_handle(Config.TARGET_WINDOW)
+            if not target_windows:
+                debug_print("找不到目標視窗", color='light_red')
+                return False
+                
+            hwnd = target_windows[0][0]
+            window_title = target_windows[0][1]
+            
+            checker = CalendarChecker()
+            if not checker.find_window():
+                return False
+            
+            if not ensure_foreground_window(hwnd, window_title):
+                debug_print("警告: 無法確保視窗在前景")
+                return False
+            
+            if not checker.find_calendar():
+                debug_print("無法找到日歷元素")
+                return False
+            
+            debug_print("找到日歷元素!", color='blue')
+            if checker.click_date(days_ago):
+                try:
+                    debug_print(f"日歷可見性: {checker.calendar.is_visible()}", color='blue')
+                    return True
+                except Exception as e:
+                    debug_print(f"獲取日歷資訊時發生錯誤: {str(e)}")
+                    return False
             return False
             
-        hwnd = target_windows[0][0]
-        window_title = target_windows[0][1]
-        
-        checker = CalendarChecker() # 創建CalendarChecker實例
-        if not checker.find_window():
-            return False
-        
-        if not ensure_foreground_window(hwnd, window_title): # 確保視窗在前景
-            debug_print("警告: 無法確保視窗在前景")
-            return False
-        
-        if not checker.find_calendar():
-            debug_print("無法找到日歷元素")
-            return False
-        
-        debug_print("找到日歷元素!")
-        if checker.click_date(days_ago): # 點擊日期
-            try:
-                debug_print(f"日歷可見性: {checker.calendar.is_visible()}")
-                return True
-            except Exception as e:
-                debug_print(f"獲取日歷資訊時發生錯誤: {str(e)}")
-                return False
-        return False
-        
+        finally:
+            is_program_moving = False  # 確保標記被重置
+            
     except Exception as e:
+        is_program_moving = False  # 確保發生錯誤時重設標記
         debug_print(f"檢測日歷元素時發生錯誤: {str(e)}", color='light_red')
         return False
 
 def start_click_calendar_blank():
     """開始點擊日歷空白處"""
     try:
-        debug_print("開始點擊日歷空白處...")
+        debug_print("開始點擊日歷空白處...", color='yellow')
 
         checker = CalendarChecker()
         if not checker.find_window():
@@ -173,10 +203,10 @@ def start_click_calendar_blank():
             debug_print("無法找到日歷元素")
             return False
         
-        debug_print("找到日歷元素!")
+        debug_print("找到日歷元素!", color='blue')
         if checker.click_calendar_blank(): # 點擊日歷空白處
             try:
-                debug_print(f"日歷可見性: {checker.calendar.is_visible()}")
+                debug_print(f"日歷可見性: {checker.calendar.is_visible()}", color='blue')
                 return True
             except Exception as e:
                 debug_print(f"獲取日歷資訊時發生錯誤: {str(e)}")

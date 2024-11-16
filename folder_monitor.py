@@ -104,7 +104,7 @@ class FolderMonitor:
             target = os.path.join(self.target_path, filename)
             # 複製檔案
             shutil.copy2(source, target)
-            debug_print(f"已複製: {filename}", color='blue')
+            debug_print(f"已複製: {filename}", color='white')
         except Exception as e:
             debug_print(f"複製檔案失敗: {filename}, 錯誤: {str(e)}", color='light_red')
     
@@ -142,11 +142,11 @@ class FolderMonitor:
 def start_folder_monitor(existing_monitor=None):
     """啟動或切換資料夾監控"""
     if existing_monitor and existing_monitor.is_monitoring:
-        debug_print("停止資料夾監控...")
+        debug_print("停止資料夾監控...", color='yellow')
         existing_monitor.stop_monitoring()
         return None
     else:
-        debug_print("啟動資料夾監控...")
+        debug_print("啟動資料夾監控...", color='yellow')
         monitor = FolderMonitor()
         monitor.start_monitoring()
         return monitor

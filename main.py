@@ -188,14 +188,14 @@ class FileProcessor:
                             if not file.window_text().endswith("_公司")
                         ]
                         all_files.extend(valid_files)
-                        debug_print(f"[{list_name}] 檔案數量: {file_count}", color='blue')
+                        debug_print(f"[{list_name}] 檔案數量: {file_count}", color='white')
                     else:
                         debug_print(f"[{list_name}] 沒有可下載的檔案", color='yellow')
                 else:
                     debug_print(f"[{list_name}] 是空白的，跳過", color='yellow')
 
             if not all_files:
-                debug_print("警告: 沒有找到可下載的檔案", color='yellow')
+                debug_print("警告: 沒有找到可下載的檔案", color='light_red')
                 return
 
             debug_print(f"總共找到 {len(all_files)} 個可下載檔案", color='green')
@@ -221,7 +221,7 @@ class FileProcessor:
                     # 使用對應的有效列表區域
                     list_area = valid_areas[area_index]
                     if not is_file_visible(file, list_area):
-                        debug_print(f"檔案 '{file_name}' 不在可視範圍內，嘗試調整位置", color='blue')
+                        debug_print(f"檔案 '{file_name}' 不在可視範圍內，嘗試調整位置", color='magenta')
                         if not scroll_to_file(file, list_area, hwnd):
                             debug_print(f"無法使檔案 '{file_name}' 進入可視範圍，跳過")
                             continue
@@ -275,7 +275,7 @@ class FileProcessor:
                 self.close_windows(click_count)
 
             # 檢查是否有漏掉的檔案
-            debug_print("檢查是否有漏掉的檔案...", color='magenta')
+            debug_print("檢查是否有漏掉的檔案...", color='cyan')
             
             # 獲取所有新檔案（不含_公司）
             new_files = set()
@@ -290,7 +290,7 @@ class FileProcessor:
             missed_files = new_files - downloaded_files
 
             if missed_files:
-                debug_print(f"發現 {len(missed_files)} 個漏掉的檔案，開始下載...", color='yellow')
+                debug_print(f"發現 {len(missed_files)} 個漏掉的檔案，開始下載...", color='cyan')
                 self.download_missed_files(missed_files, main_window, hwnd)
 
             debug_print("所有檔案下載完成", color='green')
@@ -463,7 +463,7 @@ class MainApp:
     def execute_sequence(self):
         """執行連續任務"""
         self.start_esc_listener()
-        debug_print("開始執行連續任務...", color='light_blue')
+        debug_print("開始執行連續任務...", color='cyan')
         
         # 先獲取視窗句柄
         target_windows = find_window_handle(Config.TARGET_WINDOW)
@@ -476,13 +476,13 @@ class MainApp:
         def press_left_or_up(left_times, up_times):
             """連續按左或上鍵指定次數"""
             if left_times > 0:
-                debug_print(f"按下左鍵 {left_times} 次", color='orange')
+                debug_print(f"按下左鍵 {left_times} 次", color='yellow')
             for _ in range(left_times):
                 pyautogui.press('left')
                 time.sleep(Config.SLEEP_INTERVAL)
             
             if up_times > 0:
-                debug_print(f"按下上鍵 {up_times} 次", color='orange')
+                debug_print(f"按下上鍵 {up_times} 次", color='yellow')
             for _ in range(up_times):
                 pyautogui.press('up')
                 time.sleep(Config.SLEEP_INTERVAL)
@@ -513,7 +513,7 @@ class MainApp:
 
             ("點擊日歷空白處", lambda: start_click_calendar_blank()),
             ("鍵盤向下X4", lambda: [pyautogui.press('down') for _ in range(4)]),
-            ("復製今日檔案", lambda: self.copy_today_files()),
+            ("複製今日檔案", lambda: self.copy_today_files()),
         ]
         
         # 執行所有步驟
@@ -534,7 +534,7 @@ class MainApp:
         self.should_stop = False
         self.stop_event.clear()
         
-        debug_print("開始下載當前列表檔案...", color='light_blue')
+        debug_print("開始下載當前列表檔案...", color='cyan')
         
         self.start_esc_listener()
         move_to_safe_position()
@@ -609,7 +609,7 @@ class MainApp:
             keyboard.add_hotkey('ctrl+shift+f11', self.list_all_reports)  # 添加新的快捷鍵
 
             # 顯示熱鍵說明
-            debug_print("\n=== 快捷鍵說明 ===", color='cyan')
+            debug_print("=== 快捷鍵說明 ===", color='cyan')
             debug_print("按下 CTRL + SHIFT + E    開始連續下載任務", color='green')
             debug_print("按下 CTRL + SHIFT + F    下載當前列表檔案", color='green')
             debug_print("按下 CTRL + SHIFT + G    檢測檔案列表區域", color='green')
@@ -631,14 +631,14 @@ class MainApp:
             # 使用阻塞方式等待 Ctrl+Shift+Q
             try:
                 keyboard.wait('ctrl+shift+q')
-                debug_print("收到關閉程式的命令", color='yellow')
+                debug_print("收到關閉程式的命令", color='magenta')
             except Exception as e:
                 debug_print(f"等待關閉命令時發生錯誤: {str(e)}", color='light_red')
             
         except Exception as e:
             debug_print(f"程式執行時發生錯誤: {str(e)}", color='light_red')
         finally:
-            debug_print("正在清理並關閉程式...", color='yellow')
+            debug_print("正在清理並關閉程式...", color='cyan')
             keyboard.unhook_all()
 
 def main():

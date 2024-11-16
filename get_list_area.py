@@ -232,13 +232,13 @@ def get_control_at_position(x, y, hwnd):
 def monitor_clicks():
     """監控滑鼠點擊"""
     try:
-        debug_print("開始監控滑鼠點擊...")
-        debug_print("按 ESC 停止監控")
+        debug_print("開始監控滑鼠點擊...", color='cyan')
+        debug_print("按 ESC 停止監控", color='cyan')
         
         # 獲取目標視窗
         target_windows = find_window_handle(Config.TARGET_WINDOW)
         if not target_windows:
-            debug_print("找不到目標視窗")
+            debug_print("找不到目標視窗", color='light_red')
             return
             
         hwnd = target_windows[0][0]

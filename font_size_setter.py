@@ -31,13 +31,13 @@ def set_font_size():
         main_window = app.window(handle=hwnd)
         combo = main_window.child_window(title="字型大小:", control_type="ComboBox")
         
-        debug_print("開始設定字型大小...")
+        debug_print("開始設定字型大小...", color='cyan')
         
         # 點擊下拉選單右側按鈕
         rect = combo.rectangle()
         center_x, center_y = calculate_center_position(rect)
         if center_x is None or center_y is None:
-            debug_print("無法計算下拉選單位置")
+            debug_print("無法計算下拉選單位置", color='light_red')
             return False
             
         # 調整到右側按鈕位置
