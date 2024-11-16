@@ -6,8 +6,7 @@ from datetime import datetime
 import time
 from utils import (debug_print, find_window_handle, ensure_foreground_window, 
                   get_list_items_by_id)
-
-TARGET_WINDOW = "stocks"  # 直接定義常數
+from config import Config  # 添加這行
 
 # 全域變數用於控制停止
 should_stop = False
@@ -37,7 +36,7 @@ def get_list_area():
         reset_stop()  # 重置停止標誌
         
         # 尋找目標視窗
-        target_windows = find_window_handle(TARGET_WINDOW)
+        target_windows = find_window_handle(Config.TARGET_WINDOW)
         if not target_windows:
             debug_print("錯誤: 找不到相關視窗")
             return None
@@ -116,7 +115,7 @@ def start_list_area_checker():
         debug_print("\n開始尋找所有列表區域:")
         
         # 獲取目標視窗
-        target_windows = find_window_handle(TARGET_WINDOW)
+        target_windows = find_window_handle(Config.TARGET_WINDOW)
         if not target_windows:
             debug_print("找不到目標視窗")
             return None
@@ -166,7 +165,7 @@ def list_all_controls():
         debug_print("\n開始列出所有控件:")
         
         # 獲取目標視窗
-        target_windows = find_window_handle(TARGET_WINDOW)
+        target_windows = find_window_handle(Config.TARGET_WINDOW)
         if not target_windows:
             debug_print("找不到目標視窗")
             return
@@ -237,7 +236,7 @@ def monitor_clicks():
         debug_print("按 ESC 停止監控")
         
         # 獲取目標視窗
-        target_windows = find_window_handle(TARGET_WINDOW)
+        target_windows = find_window_handle(Config.TARGET_WINDOW)
         if not target_windows:
             debug_print("找不到目標視窗")
             return

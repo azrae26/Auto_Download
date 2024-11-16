@@ -5,6 +5,7 @@ import pyautogui
 import time
 from utils import (debug_print, find_window_handle, ensure_foreground_window, 
                   calculate_center_position)
+from config import Config
 
 class CalendarChecker:
     """日曆檢查器類"""
@@ -21,7 +22,7 @@ class CalendarChecker:
         
     def find_window(self):
         """找到目標視窗"""
-        windows = find_window_handle(self.window_title)
+        windows = find_window_handle(Config.TARGET_WINDOW)
         
         if not windows:
             debug_print("錯誤: 找不到目標視窗")
@@ -115,46 +116,73 @@ class CalendarChecker:
             debug_print(f"點擊日歷空白處時發生錯誤: {str(e)}")
             return False
 
-def start_calendar_checker(days_ago):
-    """開始檢測日歷元素並點選今日日期"""
-    debug_print("開始檢測日歷元素並點選今日日期...")
-    
-    checker = CalendarChecker() # 創建CalendarChecker實例
-    if not checker.find_window():
-        return
+def start_calendar_checker(days_ago=0):
+    """開始檢測日歷元素並點選日期"""
+    try:
+        debug_print("開始檢測日歷元素並點選今日日期...", color='yellow')
         
-    if not ensure_foreground_window(checker.hwnd, checker.window_title): # 確保視窗在前景
-        debug_print("警告: 無法確保視窗在前景")
-    
-    if not checker.find_calendar():
-        debug_print("無法找到日歷元素")
-        return
+        # 獲取目標視窗
+        target_windows = find_window_handle(Config.TARGET_WINDOW)  # 使用 Config.TARGET_WINDOW
+        if not target_windows:
+            debug_print("找不到目標視窗", color='light_red')
+            return False
+            
+        hwnd = target_windows[0][0]
+        window_title = target_windows[0][1]
         
-    debug_print("找到日歷元素!")
-    if checker.click_date(days_ago): # 點擊日期
-        try:
-            debug_print(f"日歷可見性: {checker.calendar.is_visible()}")
-        except Exception as e:
-            debug_print(f"獲取日歷資訊時發生錯誤: {str(e)}")
+        checker = CalendarChecker() # 創建CalendarChecker實例
+        if not checker.find_window():
+            return False
+        
+        if not ensure_foreground_window(hwnd, window_title): # 確保視窗在前景
+            debug_print("警告: 無法確保視窗在前景")
+            return False
+        
+        if not checker.find_calendar():
+            debug_print("無法找到日歷元素")
+            return False
+        
+        debug_print("找到日歷元素!")
+        if checker.click_date(days_ago): # 點擊日期
+            try:
+                debug_print(f"日歷可見性: {checker.calendar.is_visible()}")
+                return True
+            except Exception as e:
+                debug_print(f"獲取日歷資訊時發生錯誤: {str(e)}")
+                return False
+        return False
+        
+    except Exception as e:
+        debug_print(f"檢測日歷元素時發生錯誤: {str(e)}", color='light_red')
+        return False
 
 def start_click_calendar_blank():
     """開始點擊日歷空白處"""
-    debug_print("開始點擊日歷空白處...")
+    try:
+        debug_print("開始點擊日歷空白處...")
 
-    checker = CalendarChecker()
-    if not checker.find_window():
-        return
-    
-    if not ensure_foreground_window(checker.hwnd, checker.window_title):
-        debug_print("警告: 無法確保視窗在前景")
+        checker = CalendarChecker()
+        if not checker.find_window():
+            return False
         
-    if not checker.find_calendar():
-        debug_print("無法找到日歷元素")
-        return
-    
-    debug_print("找到日歷元素!")
-    if checker.click_calendar_blank(): # 點擊日歷空白處
-        try:
-            debug_print(f"日歷可見性: {checker.calendar.is_visible()}")
-        except Exception as e:
-            debug_print(f"獲取日歷資訊時發生錯誤: {str(e)}")
+        if not ensure_foreground_window(checker.hwnd, checker.window_title):
+            debug_print("警告: 無法確保視窗在前景")
+            return False
+            
+        if not checker.find_calendar():
+            debug_print("無法找到日歷元素")
+            return False
+        
+        debug_print("找到日歷元素!")
+        if checker.click_calendar_blank(): # 點擊日歷空白處
+            try:
+                debug_print(f"日歷可見性: {checker.calendar.is_visible()}")
+                return True
+            except Exception as e:
+                debug_print(f"獲取日歷資訊時發生錯誤: {str(e)}")
+                return False
+        return False
+        
+    except Exception as e:
+        debug_print(f"點擊日歷空白處時發生錯誤: {str(e)}", color='light_red')
+        return False

@@ -6,13 +6,15 @@ import time
 from pywinauto.application import Application as PywinautoApp
 import win32api
 import pyautogui
-from colorama import init, Fore, Style
+from colorama import init, Fore, Back, Style
+from config import Config  # 添加這行
 
 # 初始化 colorama
 init()
 
 # 顏色映射
 COLORS = {
+    # 文字顏色
     'red': Fore.RED,                      # 錯誤訊息，紅色
     'orange': Fore.LIGHTRED_EX,           # 橘色
     'green': Fore.GREEN,                  # 成功訊息，綠色
@@ -29,10 +31,24 @@ COLORS = {
     'light_white': Fore.LIGHTWHITE_EX,    # 亮白色
     'dark_grey': Fore.LIGHTBLACK_EX,      # 深灰色
     'reset': Style.RESET_ALL,             # 重置顏色
+    # 背景顏色
+    'bg_red': Back.RED,                   # 紅色背景
+    'bg_green': Back.GREEN,               # 綠色背景
+    'bg_yellow': Back.YELLOW,             # 黃色背景
+    'bg_blue': Back.BLUE,                 # 藍色背景
+    'bg_magenta': Back.MAGENTA,           # 洋紅色背景
+    'bg_cyan': Back.CYAN,                 # 青色背景
+    'bg_white': Back.WHITE,               # 白色背景
+    'bg_reset': Back.RESET,               # 重置背景
+    # 樣式
+    'bold': Style.BRIGHT,                  # 粗體
+    'dim': Style.DIM,                      # 暗淡
+    'normal': Style.NORMAL,                # 正常
+    'reset': Style.RESET_ALL,              # 重置樣式
 }
 
 # 全域常數
-SLEEP_INTERVAL = 0.1  # 基本等待時間
+SLEEP_INTERVAL = Config.SLEEP_INTERVAL  # 基本等待時間
 
 # 全域變數
 debug_queue = Queue()
@@ -40,11 +56,12 @@ refresh_checking = False  # 用於控制刷新檢測的開關
 last_mouse_pos = None
 is_program_moving = False
 
-def debug_print(message, color='white'):
+def debug_print(message, color='white', bg_color=None):
     """帶時間戳和顏色的輸出函數"""
     timestamp = datetime.now().strftime('[%Y-%m-%d %H:%M:%S]')
     color_code = COLORS.get(color, Fore.WHITE)
-    print(f"{timestamp} {color_code}{message}{Style.RESET_ALL}")
+    bg_code = COLORS.get(bg_color, '') if bg_color else ''
+    print(f"{timestamp} {color_code}{bg_code}{message}{Style.RESET_ALL}")
 
 def find_window_handle(target_title=None):
     """
@@ -56,15 +73,20 @@ def find_window_handle(target_title=None):
             title = win32gui.GetWindowText(hwnd)
             # 如果有指定目標標題，使用模糊比對
             if target_title:
-                # 移除版本號部分再比對
-                window_name = title.split('版本')[0].strip()
-                if target_title.lower() in window_name.lower():
+                # 檢查標題是否包含 "DostocksBiz"
+                if "DostocksBiz" in title:
+                    debug_print(f"找到視窗: {title}", color='green')
                     windows.append((hwnd, title))
             else:
                 if title:
                     windows.append((hwnd, title))
     windows = []
     win32gui.EnumWindows(callback, windows)
+    
+    if not windows:
+        debug_print("找不到任何符合的視窗", color='light_red')
+        debug_print("請確認 DostocksBiz 程式是否已啟動", color='yellow')
+    
     return windows 
 
 def ensure_foreground_window(hwnd, window_title=None, sleep_time=0.2):
@@ -167,7 +189,9 @@ def calculate_center_position(rect):
             return None, None
             
         center_x = (rect.left + rect.right) // 2
+        debug_print(f"計算中心點位置: {center_x}", color='blue')
         center_y = (rect.top + rect.bottom) // 2
+        debug_print(f"計算中心點位置: {center_y}", color='blue')
         
         if not isinstance(center_x, (int, float)) or not isinstance(center_y, (int, float)):
             debug_print("錯誤: 計算結果無效", color='red')
@@ -442,14 +466,44 @@ def scroll_to_file(file, list_area, hwnd):
                 
         if current_index is None:
             debug_print("找不到游標選中的檔案", color='light_red')
-            # 點擊列表2
-            return False
-            
+            # 將中文列表名稱轉換為英文標識符
+            list_type = None
+            if target_list == '晨會報告':
+                list_type = 'morning'
+            elif target_list == '研究報告':
+                list_type = 'research'
+            elif target_list == '產業報告':
+                list_type = 'industry'
+                
+            if list_type:
+                debug_print(f"嘗試點擊{target_list}列表", color='yellow')
+                # 點擊切換到目標檔案所在的列表
+                if not switch_to_list(hwnd, list_type, next_list=False):
+                    debug_print("切換到目標列表失敗", color='light_red')
+                    return False
+                    
+                # 重新獲取目標列表區域
+                list_area = main_window.child_window(auto_id=target_list_id)
+                debug_print("已更新列表區域", color='green')
+                
+                # 重新檢查檔案可見性
+                if is_file_visible(file, list_area):
+                    debug_print("切換列表後檔案已可見", color='green')
+                    return True
+                    
+                # 設定當前列表和索引
+                current_list = target_list
+                current_index = target_index  # 設定為目標檔案的索引
+                debug_print(f"更新當前索引為: {current_index}", color='magenta')
+            else:
+                debug_print("無法識別目標列表類型", color='light_red')
+                return False
+                
         # 檢查是否需要切換列表
         if target_list != current_list:
             debug_print(f"需要從{current_list}切換到{target_list}", color='yellow')
             # 切換列表時傳入視窗標題
-            if not switch_to_next_list(hwnd):
+            if not switch_to_list(hwnd):
                 return False
             time.sleep(0.2)  # 等待列表切換完成
             
@@ -480,13 +534,13 @@ def scroll_to_file(file, list_area, hwnd):
                 
             # 決定滾動方向
             if target_index < current_index:
-                debug_print("目標檔案在上方，向上翻頁", color='orange')
+                debug_print("目標檔案在上方，向上翻頁", color='yellow')
                 pyautogui.press('pageup')
             else:
-                debug_print("目標檔案在下方，向下翻頁", color='orange')
+                debug_print("目標檔案在下方，向下翻頁", color='yellow')
                 pyautogui.press('pagedown')
                 
-            time.sleep(0.2)
+            time.sleep(0.5)
             attempts += 1
             
         debug_print(f"已達最大嘗試次數 {max_attempts}，無法找到目標檔案", color='light_red')
@@ -519,8 +573,8 @@ def is_file_visible(file, list_area):
         if is_visible:
             debug_print(f"檔案在可視範圍內 (top={file_rect.top}, bottom={file_rect.bottom})", color='green')
         else:
-            debug_print(f"檔案不在可視範圍內 (top={file_rect.top}, bottom={file_rect.bottom})", color='yellow')
-            debug_print(f"列表範圍: top={list_rect.top}, bottom={list_rect.bottom}", color='yellow')
+            debug_print(f"檔案不在可視範圍內 (top={file_rect.top}, bottom={file_rect.bottom})", color='light_red')
+            debug_print(f"列表範圍: top={list_rect.top}, bottom={list_rect.bottom}", color='light_red')
             
         return is_visible
         
@@ -528,40 +582,61 @@ def is_file_visible(file, list_area):
         debug_print(f"檢查檔案可見性時發生錯誤: {str(e)}", color='light_red')
         return False
 
-def switch_to_next_list(hwnd): # hwnd 是視窗句柄
-    """切換到下一個列表"""
+def switch_to_list(hwnd, list_type=None, next_list=True):
+    """
+    切換到指定列表或下一個列表
+    hwnd: 視窗句柄
+    list_type: 'morning'|'research'|'industry' 指定要切換到哪個列表
+    next_list: True=切換到下一個列表, False=切換到指定列表
+    """
     try:
         # 連接到視窗
         app = PywinautoApp(backend="uia").connect(handle=hwnd)
         main_window = app.window(handle=hwnd)
         
-        # 獲取所有列表
-        lists = main_window.descendants(control_type="List")
-        if len(lists) >= 2:  # 確保至少有兩個列表
-            # 獲取下一個列表的位置
-            next_list = lists[1]  # 從左側列表切換到中間列表
-            rect = next_list.rectangle()
-            
-            # 計算點擊位置（列表頂部往下 10px 的位置）
-            center_x = (rect.left + rect.right) // 2
-            click_y = rect.top + 10
-            
-            # 移動到位置並點擊，等待時間設為 0.1 秒
-            click_at(
-                center_x, 
-                click_y, 
-                clicks=1, 
-                sleep_interval=SLEEP_INTERVAL,
-                hwnd=hwnd, 
-                window_title=win32gui.GetWindowText(hwnd)
-            )
-            
-            debug_print(f"已切換到下一個列表", color='green')
-            return True
-            
+        list_types = {
+            'morning': ('listBoxMorningReports', '晨會報告'),
+            'research': ('listBoxResearchReports', '研究報告'),
+            'industry': ('listBoxIndustryReports', '產業報告')
+        }
+
+        if next_list:
+            # 切換到下一個列表的邏輯
+            lists = main_window.descendants(control_type="List")
+            if len(lists) >= 2:
+                next_list = lists[1]  # 從左側列表切換到中間列表
+                rect = next_list.rectangle()
+                debug_print("切換到下一個列表", color='yellow')
+            else:
+                debug_print("警告: 找不到足夠的列表區域", color='light_red')
+                return False
         else:
-            debug_print("警告: 找不到足夠的列表區域", color='light_red')
-            return False
+            # 切換到指定列表的邏輯
+            if list_type not in list_types:
+                debug_print(f"錯誤: 無效的列表類型 {list_type}", color='light_red')
+                return False
+                
+            list_id, list_name = list_types[list_type]
+            target_list = main_window.child_window(auto_id=list_id)
+            rect = target_list.rectangle()
+            debug_print(f"切換到{list_name}列表", color='yellow')
+
+        # 計算點擊位置（列表頂部往下 10px 的位置）
+        center_x = (rect.left + rect.right) // 2
+        click_y = rect.top + 10
+        
+        # 移動到位置並點擊
+        click_at(
+            center_x, 
+            click_y, 
+            clicks=1, 
+            sleep_interval=SLEEP_INTERVAL,
+            hwnd=hwnd, 
+            window_title=win32gui.GetWindowText(hwnd)
+        )
+        
+        debug_print(f"已完成列表切換", color='green')
+        return True
             
     except Exception as e:
         debug_print(f"切換列表時發生錯誤: {str(e)}", color='light_red')

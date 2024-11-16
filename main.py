@@ -15,31 +15,12 @@ from get_list_area import start_list_area_checker, set_stop, list_all_controls, 
 from utils import (debug_print, find_window_handle, ensure_foreground_window, 
                   get_list_items_by_id, calculate_center_position, refresh_checking, 
                   start_refresh_check, stop_refresh_check, click_at, move_to_safe_position, 
-                  check_mouse_movement, scroll_to_file, is_file_visible, switch_to_next_list)
+                  check_mouse_movement, scroll_to_file, is_file_visible, switch_to_list)
 from scheduler import Scheduler
 from font_size_setter import set_font_size
 from chrome_monitor import start_chrome_monitor
 from folder_monitor import start_folder_monitor, FolderMonitor
-
-class Config:
-    """配置類，集中管理所有配置參數"""
-    RETRY_LIMIT = 10  # 向上翻頁次數
-    CLICK_BATCH_SIZE = 10  # 批次下載檔案數量
-    SLEEP_INTERVAL = 0.1  # 基本等待時間為 0.1 秒
-    DOUBLE_CLICK_INTERVAL = 0.1  # 雙擊間隔間
-    CLICK_INTERVAL = 0.6  # 連續點擊間隔
-    MOUSE_MAX_OFFSET = 100  # 滑鼠最大偏移量
-    TARGET_WINDOW = "stocks"
-    PROCESS_NAME = "DOstocksBiz.exe"
-
-    @staticmethod
-    def get_schedule_times():
-        """返回排程時間列表"""
-        return [
-            {'type': 'daily', 'time': '10:00'},  # 每日固定時間
-            #{'type': 'weekly', 'weekday': 'wednesday', 'time': '11:00'},  # 每週三 11 點
-            {'type': 'once', 'date': '2024-11-15', 'time': '10:50'}  # 單次執行時間
-        ]
+from config import Config  # 添加這行
 
 class WindowHandler:
     """處理窗口相關操作"""
@@ -85,7 +66,7 @@ class ListNavigator:
                     debug_print(f"無法在當前列表找到案 '{file_name}'，嘗試切換到下一個列表")
                     win32gui.SetForegroundWindow(hwnd)
                     time.sleep(Config.SLEEP_INTERVAL * 2)
-                    switch_to_next_list(hwnd)
+                    switch_to_list(hwnd)
                     return False
             else:
                 if not self.searching_up and self.down_retry_count < Config.RETRY_LIMIT:
@@ -109,7 +90,7 @@ class ListNavigator:
                     debug_print(f"無法在當前列表找到檔案 '{file_name}'，嘗試切換到下一個列表")
                     win32gui.SetForegroundWindow(hwnd)
                     time.sleep(Config.SLEEP_INTERVAL * 2)
-                    switch_to_next_list(hwnd)
+                    switch_to_list(hwnd)
                     return False
         return True
 
@@ -283,7 +264,7 @@ class FileProcessor:
                         else:
                             debug_print(f"切換到下一個列表", color='cyan')
                             debug_print(f"開始切換列表: 點擊左鍵", color='yellow')
-                            switch_to_next_list(hwnd)
+                            switch_to_list(hwnd)
 
                 except Exception as e:
                     debug_print(f"處理檔案時發生錯誤: {str(e)}", color='light_red')
@@ -296,30 +277,18 @@ class FileProcessor:
             # 檢查是否有漏掉的檔案
             debug_print("檢查是否有漏掉的檔案...", color='magenta')
             
-            # 列表類型
-            list_types = [
-                ('morning', '晨會報告'),
-                ('research', '研究報告'),
-                ('industry', '產業報告')
-            ]
-            
-            # 新檔案
+            # 獲取所有新檔案（不含_公司）
             new_files = set()
-            
-            # 獲取新檔案
             for list_type, _ in list_types:
-                try:
-                    # 獲取檔案
-                    files = get_list_items_by_id(main_window, list_type)
-                    # 更新新檔案
-                    new_files.update(file.window_text() for file in files)
-                except Exception as e:
-                    debug_print(f"獲取 {list_type} 列表檔案時發生錯誤: {str(e)}", color='light_red')
-                    continue
-            
+                files = get_list_items_by_id(main_window, list_type)
+                new_files.update(
+                    file.window_text() for file in files 
+                    if not file.window_text().endswith("_公司")
+                )
+
             # 找出漏掉的檔案
             missed_files = new_files - downloaded_files
-            
+
             if missed_files:
                 debug_print(f"發現 {len(missed_files)} 個漏掉的檔案，開始下載...", color='yellow')
                 self.download_missed_files(missed_files, main_window, hwnd)
@@ -497,7 +466,12 @@ class MainApp:
         debug_print("開始執行連續任務...", color='light_blue')
         
         # 先獲取視窗句柄
-        hwnd, window_title = self.selected_window or find_window_handle(Config.TARGET_WINDOW)[0]
+        target_windows = find_window_handle(Config.TARGET_WINDOW)
+        if not target_windows:
+            debug_print("錯誤: 找不到目標視窗", color='light_red')
+            return
+        
+        hwnd, window_title = target_windows[0]
         
         def press_left_or_up(left_times, up_times):
             """連續按左或上鍵指定次數"""
