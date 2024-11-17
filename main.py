@@ -22,19 +22,6 @@ from chrome_monitor import start_chrome_monitor
 from folder_monitor import start_folder_monitor, FolderMonitor
 from config import Config, COLORS  # 添加這行
 
-class WindowHandler:
-    """處理窗口相關操作"""
-    @staticmethod
-    def is_process_running(process_name):
-        """檢查程序是否正在運行"""
-        for proc in psutil.process_iter(['name']):
-            try:
-                if proc.info['name'].lower() == process_name.lower():
-                    return True
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                pass
-        return False
-
 class ListNavigator:
     """處理列表導航相關操作"""
     def __init__(self):
@@ -43,57 +30,6 @@ class ListNavigator:
         self.up_retry_count = 0
         self.after_tab_switch = False
 
-    def reset_search_state(self):
-        self.searching_up = False
-        self.down_retry_count = 0
-        self.up_retry_count = 0
-
-    def navigate_to_file(self, file, main_list_area, hwnd, file_name):
-        """導航到指定檔案的位置"""
-        if not self.after_tab_switch:
-            self.reset_search_state()
-        
-        while not FileProcessor.is_file_visible(file, main_list_area):
-            if self.after_tab_switch:
-                if self.up_retry_count < Config.RETRY_LIMIT:
-                    debug_print(f"檔案 '{file_name}' 不在可視範圍內，向上翻頁 (第 {self.up_retry_count + 1} 次)")
-                    win32gui.SetForegroundWindow(hwnd)
-                    time.sleep(Config.SLEEP_INTERVAL * 2)
-                    pyautogui.press('pageup')
-                    time.sleep(Config.SLEEP_INTERVAL * 5)
-                    self.up_retry_count += 1
-                else:
-                    debug_print(f"無法在當前列表找到案 '{file_name}'，嘗試切換到下一個列表")
-                    win32gui.SetForegroundWindow(hwnd)
-                    time.sleep(Config.SLEEP_INTERVAL * 2)
-                    switch_to_list(hwnd)
-                    return False
-            else:
-                if not self.searching_up and self.down_retry_count < Config.RETRY_LIMIT:
-                    debug_print(f"檔案 '{file_name}' 不在可視範圍內，向下翻頁 (第 {self.down_retry_count + 1} 次)")
-                    win32gui.SetForegroundWindow(hwnd)
-                    time.sleep(Config.SLEEP_INTERVAL * 2)
-                    pyautogui.press('pagedown')
-                    time.sleep(Config.SLEEP_INTERVAL * 5)
-                    self.down_retry_count += 1
-                elif not self.searching_up and self.down_retry_count >= Config.RETRY_LIMIT:
-                    debug_print("向下找不到，開始向上翻頁尋找")
-                    self.searching_up = True
-                elif self.searching_up and self.up_retry_count < Config.RETRY_LIMIT:
-                    debug_print(f"檔案 '{file_name}' 不在可視範圍內，向上翻頁 (第 {self.up_retry_count + 1} 次)")
-                    win32gui.SetForegroundWindow(hwnd)
-                    time.sleep(Config.SLEEP_INTERVAL * 2)
-                    pyautogui.press('pageup')
-                    time.sleep(Config.SLEEP_INTERVAL * 5)
-                    self.up_retry_count += 1
-                else:
-                    debug_print(f"無法在當前列表找到檔案 '{file_name}'，嘗試切換到下一個列表")
-                    win32gui.SetForegroundWindow(hwnd)
-                    time.sleep(Config.SLEEP_INTERVAL * 2)
-                    switch_to_list(hwnd)
-                    return False
-        return True
-
 class FileProcessor:
     """處理文件相關操作"""
     def __init__(self):
@@ -101,7 +37,6 @@ class FileProcessor:
         self.last_known_position = 0
         self.is_date_switching = False
         self.should_stop = False
-        self.navigator = ListNavigator()  # 添加 ListNavigator 實例
         pyautogui.FAILSAFE = False
 
     @staticmethod
@@ -120,24 +55,24 @@ class FileProcessor:
         """關閉指定數量的chrome分頁"""
         if count <= 0:
             return
-        
-        time.sleep(Config.SLEEP_INTERVAL * 3)  # 等待視窗完全打開
+                
+        time.sleep(Config.CLOSE_WINDOW_INTERVAL * 3)  # 等待 0.3 秒視窗完全打開
         
         try:
             # 按下 CTRL
             keyboard.press('ctrl')
-            time.sleep(Config.SLEEP_INTERVAL)  # 等待 0.1 秒 確保 CTRL 被按下
+            time.sleep(Config.CLOSE_WINDOW_INTERVAL)  # 等待 0.1 秒確保 CTRL 被按下
             
             # 按指定次數的 W
             for _ in range(count):
                 keyboard.press('w')
-                time.sleep(Config.SLEEP_INTERVAL)  # 間隔 0.1秒
+                time.sleep(Config.CLOSE_WINDOW_INTERVAL)  # 間隔 0.1 秒
                 keyboard.release('w')
-                time.sleep(Config.SLEEP_INTERVAL)  # 間隔 0.1秒
+                time.sleep(Config.CLOSE_WINDOW_INTERVAL)  # 間隔 0.1 秒
             
             # 釋放 CTRL
             keyboard.release('ctrl')
-            time.sleep(Config.SLEEP_INTERVAL)  # 等待 0.1秒 所有視窗關閉
+            time.sleep(Config.CLOSE_WINDOW_INTERVAL)  # 等待 0.1 秒所有視窗關閉
             
         except Exception as e:
             debug_print(f"關閉視窗時發生錯誤: {str(e)}", color='light_red')
@@ -161,8 +96,8 @@ class FileProcessor:
             # 初始化全域的已下載檔案集合
             downloaded_files = set()
             is_first_click = True
-            click_count = 0
-            current_list_index = 0  # 添加：追蹤當前列表索引
+            click_count = 0 # 用於計算下載的檔案數量
+            current_list_index = 0
             
             while True:
                 # 重置列表位置到第一個列表（如果不是第一次循環）
@@ -255,14 +190,14 @@ class FileProcessor:
                         )
                         debug_print(f"下載完成: {file_name}", color='white')
                         
-                        if not is_first_click:
-                            click_count += 1
-                            if click_count == Config.CLICK_BATCH_SIZE:
-                                self.close_windows(Config.CLICK_BATCH_SIZE)
-                                click_count = 0
-                        else:
+                        if is_first_click:
                             is_first_click = False
                             time.sleep(Config.SLEEP_INTERVAL * 5)
+                        else:
+                            click_count += 1
+                            if click_count >= Config.CLICK_BATCH_SIZE:
+                                self.close_windows(Config.CLICK_BATCH_SIZE)
+                                click_count = 0
 
                         downloaded_files.add(file_name)
                         
