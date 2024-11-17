@@ -15,20 +15,13 @@ from get_list_area import start_list_area_checker, set_stop, list_all_controls, 
 from utils import (debug_print, find_window_handle, ensure_foreground_window, 
                   get_list_items_by_id, calculate_center_position, refresh_checking, 
                   start_refresh_check, stop_refresh_check, click_at, move_to_safe_position, 
-                  check_mouse_movement, scroll_to_file, is_file_visible, switch_to_list)
+                  check_mouse_movement, scroll_to_file, is_file_visible, switch_to_list, 
+                  reset_mouse_position)
 from scheduler import Scheduler
 from font_size_setter import set_font_size
 from chrome_monitor import start_chrome_monitor
 from folder_monitor import start_folder_monitor, FolderMonitor
 from config import Config, COLORS  # 添加這行
-
-class ListNavigator:
-    """處理列表導航相關操作"""
-    def __init__(self):
-        self.searching_up = False
-        self.down_retry_count = 0
-        self.up_retry_count = 0
-        self.after_tab_switch = False
 
 class FileProcessor:
     """處理文件相關操作"""
@@ -38,18 +31,6 @@ class FileProcessor:
         self.is_date_switching = False
         self.should_stop = False
         pyautogui.FAILSAFE = False
-
-    @staticmethod
-    def is_last_file_in_current_list(file, current_list_items):
-        """判斷是否為當前列表的最後一個檔案"""
-        try:
-            # 獲取當前檔案在列表中的索引
-            current_index = current_list_items.index(file)
-            # 如果是列表中的最後一個項目
-            return current_index == len(current_list_items) - 1
-        except Exception as e:
-            debug_print(f"檢查檔案位置時發生錯誤: {str(e)}", color='light_red')
-            return False
 
     def close_windows(self, count):
         """關閉指定數量的chrome分頁"""
@@ -93,10 +74,35 @@ class FileProcessor:
             # 連接到視窗
             main_window = app.window(handle=hwnd)
             
+            # 應該在這裡也重置滑鼠位置記錄
+            reset_mouse_position()  # 添加這行
+            
+            # 預加載所有列表區域和檔案信息
+            list_areas = {}
+            list_files = {}
+            list_types = [
+                ('morning', '晨會報告'),
+                ('research', '研究報告'),
+                ('industry', '產業報告')
+            ]
+            
+            debug_print("開始預加載列表信息...", color='light_cyan')
+            for list_type, list_name in list_types:
+                try:
+                    # 預加載列表區域
+                    list_areas[list_type] = main_window.child_window(
+                        auto_id=f"listBox{list_type.capitalize()}Reports"
+                    )
+                    # 預加載檔案信息
+                    list_files[list_type] = get_list_items_by_id(main_window, list_type)
+                    debug_print(f"已預加載 [{list_name}] 列表，共 {len(list_files[list_type])} 個檔案", color='light_green')
+                except Exception as e:
+                    debug_print(f"預加載 {list_name} 列表時發生錯誤: {str(e)}", color='light_red')
+            
             # 初始化全域的已下載檔案集合
             downloaded_files = set()
             is_first_click = True
-            click_count = 0 # 用於計算下載的檔案數量
+            click_count = 0
             current_list_index = 0
             
             while True:
@@ -107,30 +113,19 @@ class FileProcessor:
                         switch_to_list(hwnd)
                     current_list_index = 0
                 
-                # 獲取當前所有檔案（不含已下載的）
+                # 使用預加載的數據獲取所有未下載的檔案
                 all_files = []
-                valid_areas = []  # 儲存有效的列表區域
+                valid_areas = []
                 
-                # 使用正確的列表類型標識符
-                list_types = [
-                    ('morning', '晨會報告'),
-                    ('research', '研究報告'),
-                    ('industry', '產業報告')
-                ]
-                
-                # 獲取所有未下載的檔案
                 for list_type, list_name in list_types:
-                    debug_print(f"獲取 [{list_name}] 檔案...", color='light_cyan')
-                    files = get_list_items_by_id(main_window, list_type)
-                    if files:
-                        # 獲取列表區域
-                        list_area = main_window.child_window(auto_id=f"listBox{list_type.capitalize()}Reports")
-                        valid_areas.append(list_area)
+                    if list_type in list_files and list_files[list_type]:
+                        # 使用預加載的列表區域
+                        valid_areas.append(list_areas[list_type])
                         
-                        # 只收集未下載的檔案
+                        # 使用預加載的檔案信息
                         valid_files = [
                             (file, len(valid_areas) - 1) 
-                            for file in files 
+                            for file in list_files[list_type]
                             if not file.window_text().endswith("_公司") and 
                                file.window_text() not in downloaded_files
                         ]
@@ -140,7 +135,7 @@ class FileProcessor:
                             debug_print(f"[{list_name}] 找到 {len(valid_files)} 個未下載檔案", color='white')
                         else:
                             debug_print(f"[{list_name}] 沒有新的檔案需要下載", color='yellow')
-
+                
                 if not all_files:
                     debug_print("所有檔案已下載完成", color='light_green')
                     break
@@ -281,7 +276,7 @@ class MainApp:
             if keyboard.is_pressed('esc'):
                 self.should_stop = True
                 self.stop_event.set()  # 設置停止事件
-                debug_print("\n[DEBUG] ESC 按鍵被按下，停止執行")
+                debug_print("\n[DEBUG] ESC 按鍵被按下，停止執行", color='light_red', bold=True)
                 # 同步停止其他模組
                 set_stop()  # 停止 get_list_area
                 break
@@ -297,9 +292,7 @@ class MainApp:
 
     def stop_esc_listener(self):
         """停止 ESC 監聽"""
-        self.stop_event.set()
-        if self.esc_thread and self.esc_thread.is_alive():
-            self.esc_thread.join(timeout=1.0) # 等待1秒，確保線程結束
+        self.stop_event.set()  # 設置停止事件即可，不需要等待線程結束
 
     def select_window(self, index):
         """選擇視窗並處理檔案"""
@@ -450,6 +443,7 @@ class MainApp:
         """下載當前列表檔案"""
         self.should_stop = False
         self.stop_event.clear()
+        reset_mouse_position()  # 重置滑鼠位置記錄
         
         debug_print("開始下載當前列表檔案...", color='light_cyan')
         
@@ -493,44 +487,72 @@ class MainApp:
             app = PywinautoApp(backend="uia").connect(handle=hwnd)
             main_window = app.window(handle=hwnd)
             
-            # 列出三個列表的內容
+            # 預加載所有列表區域和檔案
+            list_areas = {}
+            list_files = {}
             list_types = {
                 'morning': '晨會報告',
                 'research': '研究報告',
                 'industry': '產業報告'
             }
             
+            # 一次性獲取所有列表的檔案
             for list_type, list_name in list_types.items():
-                debug_print(f"\n=== {list_name} ===", color='light_cyan')
-                items = get_list_items_by_id(main_window, list_type)
-                for i, item in enumerate(items, 1):
-                    debug_print(f"{i}. {item.window_text()}", color='light_green')
-                
+                try:
+                    list_areas[list_type] = main_window.child_window(
+                        auto_id=f"listBox{list_type.capitalize()}Reports"
+                    )
+                    list_files[list_type] = get_list_items_by_id(main_window, list_type)
+                except Exception as e:
+                    debug_print(f"獲取 {list_name} 列表時發生錯誤: {str(e)}", color='light_red')
+                    continue
+            
+            # 顯示結果
+            for list_type, list_name in list_types.items():
+                if list_type in list_files:
+                    debug_print(f"\n=== {list_name} ===", color='light_cyan')
+                    for i, item in enumerate(list_files[list_type], 1):
+                        debug_print(f"{i}. {item.window_text()}", color='light_green')
+                    
         except Exception as e:
             debug_print(f"列出報告清單時發生錯誤: {str(e)}", color='light_red')
 
     def collect_current_list(self, list_name, hwnd):
-        """
-        從指定窗口收集列表項目
-        
-        Args:
-            list_name (str): 列表名稱
-            hwnd: 窗口句柄
-        
-        Returns:
-            bool: 收集是否成功
-        """
+        """從指定窗口收集列表項目"""
         if list_name and hwnd:
             try:
                 app = PywinautoApp(backend="uia").connect(handle=hwnd)
                 main_window = app.window(handle=hwnd)
+                
+                # 預加載所有列表區域和檔案信息
+                list_areas = {}
+                list_files = {}
+                list_types = [
+                    ('morning', '晨會報告'),
+                    ('research', '研究報告'),
+                    ('industry', '產業報告')
+                ]
+                
                 self.collected_lists[list_name] = []
-                for list_type in ['morning', 'research', 'industry']:
-                    files = get_list_items_by_id(main_window, list_type)
-                    if files:
-                        self.collected_lists[list_name].extend([f.window_text() for f in files if f.window_text()])
+                
+                # 一次性獲取所有列表的檔案
+                for list_type, list_display_name in list_types:
+                    try:
+                        list_areas[list_type] = main_window.child_window(
+                            auto_id=f"listBox{list_type.capitalize()}Reports"
+                        )
+                        list_files[list_type] = get_list_items_by_id(main_window, list_type)
+                        if list_files[list_type]:
+                            self.collected_lists[list_name].extend(
+                                [f.window_text() for f in list_files[list_type] if f.window_text()]
+                            )
+                    except Exception as e:
+                        debug_print(f"收集 {list_display_name} 列表時發生錯誤: {str(e)}", color='light_red')
+                        continue
+                        
                 debug_print(f"已收集 {list_name} 列表，共 {len(self.collected_lists[list_name])} 個檔案", color='light_green')
                 return True
+                
             except Exception as e:
                 debug_print(f"收集列表時發生錯誤: {str(e)}", color='light_red')
                 return False
@@ -596,9 +618,9 @@ class MainApp:
             keyboard.add_hotkey('ctrl+shift+r', list_all_controls)
             keyboard.add_hotkey('ctrl+shift+m', monitor_clicks)
             keyboard.add_hotkey('ctrl+shift+k', self.monitor_chrome)
-            keyboard.add_hotkey('ctrl+shift+f12', self.copy_today_files)
-            keyboard.add_hotkey('ctrl+shift+f11', self.list_all_reports)
             keyboard.add_hotkey('ctrl+shift+f10', self.collect_and_analyze_lists)  # 新增這行
+            keyboard.add_hotkey('ctrl+shift+f11', self.list_all_reports)
+            keyboard.add_hotkey('ctrl+shift+f12', self.copy_today_files)
             
             # 顯示熱鍵說明
             debug_print("=== 快捷鍵說明 ===", color='light_cyan')

@@ -7,6 +7,7 @@ from pywinauto.application import Application as PywinautoApp
 import win32api
 import pyautogui
 from config import Config, COLORS  # 添加這行
+from contextlib import contextmanager
 
 # 全域常數
 SLEEP_INTERVAL = Config.SLEEP_INTERVAL  # 基本等待時間
@@ -16,6 +17,16 @@ debug_queue = Queue() # 用於儲存 debug 訊息的佇列
 refresh_checking = False  # 用於控制刷新檢測的開關
 last_mouse_pos = None # 用於儲存滑鼠最後位置
 is_program_moving = False # 用於控制程式是否移動
+
+@contextmanager
+def program_moving_context():
+    """控制程式移動滑鼠的上下文管理器"""
+    global is_program_moving
+    is_program_moving = True
+    try:
+        yield
+    finally:
+        is_program_moving = False
 
 def debug_print(message, color='white', bg_color=None, bold=False):
     """
@@ -235,15 +246,16 @@ def check_mouse_movement():
     if is_program_moving:
         return False
         
-    current_pos = pyautogui.position()
+    # 使用 win32api 獲取滑鼠位置
+    current_pos = win32api.GetCursorPos()
     
     if last_mouse_pos is None:
         last_mouse_pos = current_pos
         return False
         
     # 檢查是否移動超過 3 像素
-    has_moved = (abs(current_pos.x - last_mouse_pos.x) >= 3 or 
-                abs(current_pos.y - last_mouse_pos.y) >= 3)
+    has_moved = (abs(current_pos[0] - last_mouse_pos[0]) >= 3 or 
+                abs(current_pos[1] - last_mouse_pos[1]) >= 3)
     
     # 只有在非程式移動且確實檢測到移動時才更新位置
     if has_moved and not is_program_moving:
@@ -253,70 +265,89 @@ def check_mouse_movement():
 
 def move_to_safe_position():
     """移動到安全位置"""
-    screen_width, screen_height = pyautogui.size()
-    pyautogui.moveTo(screen_width // 2, screen_height // 2)
-    time.sleep(SLEEP_INTERVAL)  # 使用本地定義的 SLEEP_INTERVAL
-
+    with program_moving_context():
+        screen_width, screen_height = pyautogui.size()
+        pyautogui.moveTo(screen_width // 2, screen_height // 2)
+        time.sleep(SLEEP_INTERVAL)
 
 def check_target_element(hwnd, x, y, expected_text=None):
-    """檢查指定位置的元素是否符合預期"""
+    """
+    檢查指定位置的元素是否符合預期
+    
+    Args:
+        hwnd: 視窗句柄
+        x, y: 目標座標
+        expected_text: 預期的元素文字
+    
+    Returns:
+        bool: 是否符合預期
+    """
+    if not expected_text:
+        return True
+        
     try:
-        # 如果沒有預期文字，則返回 True
-        if not expected_text:
-            return True
-            
-        # 連接到視窗
         app = PywinautoApp(backend="uia").connect(handle=hwnd)
         main_window = app.window(handle=hwnd)
         
-        # 搜索範圍（像素）
-        search_range = 5
-        
-        # 在周圍區域搜索元素
-        for offset_x in range(-search_range, search_range + 1): # 負數
-            for offset_y in range(-search_range, search_range + 1): # 負數
+        # 使用遞增的搜索範圍
+        for search_range in [3, 5, 8]:  # 從小範圍開始搜索
+            
+            # 先檢查目標位置
+            try:
+                element = main_window.from_point(x, y)
+                if element and element.window_text() == expected_text:
+                    return True
+            except Exception:
+                pass
+            
+            # 使用四個方向搜索
+            directions = [
+                (0, search_range),    # 上
+                (0, -search_range),   # 下
+                (search_range, 0),    # 右
+                (-search_range, 0)    # 左
+            ]
+            
+            for dx, dy in directions:
                 try:
-                    element = main_window.from_point(x + offset_x, y + offset_y) # 正負數
-                    if element:
-                        element_text = element.window_text() # 文字
-                        if element_text == expected_text: # 文字比對
-                            return True
-                except:
+                    element = main_window.from_point(x + dx, y + dy)
+                    if element and element.window_text() == expected_text:
+                        debug_print(f"在偏移位置 ({dx}, {dy}) 找到元素: {expected_text}", color='light_green')
+                        return True
+                except Exception:
                     continue
-                    
-        debug_print(f"點擊位置不是目標元素: {expected_text}", color='light_red')
+        
+        debug_print(f"找不到目標元素: {expected_text}", color='light_red')
         return False
- 
+        
     except Exception as e:
         debug_print(f"檢查元素時發生錯誤: {str(e)}", color='light_red')
         return False
 
 def click_at(x, y, is_first_click=False, clicks=1, interval=SLEEP_INTERVAL, sleep_interval=None, hwnd=None, window_title=None, expected_text=None):
     """使用 win32api 進行點擊，並檢查元素文字"""
-    global is_program_moving, last_mouse_pos
+    global last_mouse_pos
     
     try: 
         max_retries = 2  # 最大重試次數
         retry_count = 0
         
-        # 設定標記為程式移動 - 移到這裡，整個操作開始前就設置
-        is_program_moving = True
-        
-        try:
-            while retry_count < max_retries:
-                # 確保視窗在前景
-                if not ensure_foreground_window(hwnd, window_title):
-                    debug_print("視窗不在前景，重新嘗試點擊", color='light_red')
-                    retry_count += 1
-                    continue
-                
-                # 移動滑鼠前檢查
-                if check_mouse_movement():
-                    debug_print("檢測到滑鼠移動，暫停 1 秒後重試", color='light_red')
-                    time.sleep(1)
-                    retry_count += 1
-                    continue
-                    
+        while retry_count < max_retries:
+            # 檢查滑鼠移動
+            if check_mouse_movement():  # 移回原來的檢查方式
+                debug_print("檢測到滑鼠移動，暫停 2 秒後重試", color='light_red')
+                time.sleep(2)
+                retry_count += 1
+                continue
+            
+            # 確保視窗在前景
+            if not ensure_foreground_window(hwnd, window_title):
+                debug_print("視窗不在前景，重新嘗試點擊", color='light_red')
+                retry_count += 1
+                continue
+            
+            with program_moving_context():  # 使用上下文管理器
+                # 移動滑鼠到目標位置
                 win32api.SetCursorPos((x, y))
                 time.sleep(interval * 0.1)
                 
@@ -362,15 +393,11 @@ def click_at(x, y, is_first_click=False, clicks=1, interval=SLEEP_INTERVAL, slee
                 else:
                     retry_count += 1
                     continue
-                    
-        finally:
-            is_program_moving = False  # 確保標記被重置
             
         debug_print(f"已達最大重試次數 {max_retries}，放棄此次點擊", color='light_red')
         return False
-            
+                    
     except Exception as e:
-        is_program_moving = False  # 確保發生錯誤時重設標記
         debug_print(f"點擊操作時發生錯誤: {str(e)}", color='light_red')
         return False
 
@@ -640,3 +667,17 @@ def switch_to_list(hwnd, list_type=None, next_list=True):
         is_program_moving = False  # 確保發生錯誤時重設標記
         debug_print(f"切換列表時發生錯誤: {str(e)}", color='light_red')
         return False
+
+def safe_click(x=None, y=None):
+    """安全的點擊移動並操作，使用上下文管理器"""
+
+    with program_moving_context():
+        if x is not None and y is not None:
+            pyautogui.click(x, y)
+        else:
+            pyautogui.click()
+
+def reset_mouse_position():
+    """重置滑鼠位置記錄"""
+    global last_mouse_pos
+    last_mouse_pos = None
