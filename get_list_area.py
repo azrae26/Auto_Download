@@ -42,7 +42,7 @@ def get_list_area():
             return None
 
         hwnd, window_title = target_windows[0]
-        debug_print(f"使用視窗: {window_title}", color='blue')
+        debug_print(f"使用視窗: {window_title}", color='light_blue', bold=True)
 
         if check_stop():
             debug_print("檢測已停止")
@@ -232,8 +232,8 @@ def get_control_at_position(x, y, hwnd):
 def monitor_clicks():
     """監控滑鼠點擊"""
     try:
-        debug_print("開始監控滑鼠點擊...", color='cyan')
-        debug_print("按 ESC 停止監控", color='cyan')
+        debug_print("開始監控滑鼠點擊...", color='light_cyan')
+        debug_print("按 ESC 停止監控", color='light_cyan')
         
         # 獲取目標視窗
         target_windows = find_window_handle(Config.TARGET_WINDOW)

@@ -12,17 +12,25 @@ from config import Config, COLORS  # 添加這行
 SLEEP_INTERVAL = Config.SLEEP_INTERVAL  # 基本等待時間
 
 # 全域變數
-debug_queue = Queue()
+debug_queue = Queue() # 用於儲存 debug 訊息的佇列
 refresh_checking = False  # 用於控制刷新檢測的開關
-last_mouse_pos = None
-is_program_moving = False
+last_mouse_pos = None # 用於儲存滑鼠最後位置
+is_program_moving = False # 用於控制程式是否移動
 
-def debug_print(message, color='white', bg_color=None):
-    """帶時間戳和顏色的輸出函數"""
+def debug_print(message, color='white', bg_color=None, bold=False):
+    """
+    帶時間戳和顏色的輸出函數
+    Args:
+        message (str): 要輸出的信息
+        color (str): 文字顏色
+        bg_color (str, optional): 背景顏色
+        bold (bool): 是否粗體
+    """
     timestamp = datetime.now().strftime('[%Y-%m-%d %H:%M:%S]')
     color_code = COLORS.get(color, COLORS['reset'])
     bg_code = COLORS.get(bg_color, '') if bg_color else ''
-    print(f"{timestamp} {color_code}{bg_code}{message}{COLORS['reset']}")
+    bold_code = COLORS.get('bold', '') if bold else ''
+    print(f"{timestamp} {color_code}{bg_code}{bold_code}{message}{COLORS['reset']}")
 
 def find_window_handle(target_title=None):
     """
@@ -36,7 +44,7 @@ def find_window_handle(target_title=None):
             if target_title:
                 # 檢查標題是否包含 "DostocksBiz"
                 if "DostocksBiz" in title:
-                    debug_print(f"找到視窗: {title}", color='green')
+                    debug_print(f"找到視窗: {title}", color='light_green')
                     windows.append((hwnd, title))
             else:
                 if title:
@@ -61,7 +69,7 @@ def ensure_foreground_window(hwnd, window_title=None, sleep_time=0.2):
         # 檢查視窗是否最小化
         if win32gui.IsIconic(hwnd):
             window_info = f" '{window_title}'" if window_title else ""
-            debug_print(f"視窗{window_info}已最小化，正在還原...", color='cyan')
+            debug_print(f"視窗{window_info}已最小化，正在還原...", color='light_cyan')
             win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
             time.sleep(sleep_time)
         
@@ -91,7 +99,7 @@ def ensure_foreground_window(hwnd, window_title=None, sleep_time=0.2):
             return False
             
     except Exception as e:
-        debug_print(f"確保視窗可見時發生錯誤: {str(e)}", color='red')
+        debug_print(f"確保視窗可見時發生錯誤: {str(e)}", color='light_red')
         return False
 
 def get_list_items_by_id(main_window, list_type=None):
@@ -123,7 +131,7 @@ def get_list_items_by_id(main_window, list_type=None):
                 try:
                     list_control = main_window.child_window(auto_id=list_id)
                     items = list_control.descendants(control_type="ListItem")
-                    debug_print(f"從 {list_type} 列表獲取到 {len(items)} 個項目", color='blue')
+                    debug_print(f"從 {list_type} 列表獲取到 {len(items)} 個項目", color='light_blue', bold=True)
                     all_items.extend(items)
                 except Exception as e:
                     debug_print(f"獲取 {list_type} 列表項目時發生錯誤: {str(e)}", color='light_red')
@@ -131,7 +139,7 @@ def get_list_items_by_id(main_window, list_type=None):
             return all_items
             
     except Exception as e:
-        debug_print(f"獲取列表項目時發生錯誤: {str(e)}", color='red')
+        debug_print(f"獲取列表項目時發生錯誤: {str(e)}", color='light_red')
         return []
 
 def calculate_center_position(rect):
@@ -177,7 +185,7 @@ def start_refresh_check(hwnd=None):
             
         refresh_checking = True
         current_files = [{}, {}, {}]  # 每個列表的檔案狀態
-        debug_print("開始檢測列表刷新...", color='cyan')
+        debug_print("開始檢測列表刷新...", color='light_cyan')
         
         while refresh_checking:
             try:
@@ -196,7 +204,7 @@ def start_refresh_check(hwnd=None):
                         }
                         
                         if current_files[i] and new_files != current_files[i]:
-                            debug_print(f"檢測到列表 {i+1} 刷新", color='green')
+                            debug_print(f"檢測到列表 {i+1} 刷新", color='light_green')
                             
                         current_files[i] = new_files
                             
@@ -280,7 +288,7 @@ def check_target_element(hwnd, x, y, expected_text=None):
         return False
  
     except Exception as e:
-        debug_print(f"檢查元素時發生錯誤: {str(e)}", color='red')
+        debug_print(f"檢查元素時發生錯誤: {str(e)}", color='light_red')
         return False
 
 def click_at(x, y, is_first_click=False, clicks=1, interval=SLEEP_INTERVAL, sleep_interval=None, hwnd=None, window_title=None, expected_text=None):
@@ -328,14 +336,14 @@ def click_at(x, y, is_first_click=False, clicks=1, interval=SLEEP_INTERVAL, slee
                     
                     # 在按下和彈起之間檢查目標元素
                     if expected_text and not check_target_element(hwnd, x, y, expected_text):
-                        debug_print(f"重新嘗試點擊", color='red')
+                        debug_print(f"重新嘗試點擊", color='light_red')
                         win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
                         success = False
                         break
                     
                     # 確保視窗在前景
                     if not ensure_foreground_window(hwnd, window_title):
-                        debug_print("視窗不在前景，重新嘗試點擊", color='red')
+                        debug_print("視窗不在前景，重新嘗試點擊", color='light_red')
                         win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
                         success = False
                         break
@@ -369,7 +377,7 @@ def click_at(x, y, is_first_click=False, clicks=1, interval=SLEEP_INTERVAL, slee
 def scroll_to_file(file, list_area, hwnd):
     """滾動直到檔案進入可視範圍"""
     try:
-        debug_print("開始滾動檢查...", color='cyan')
+        debug_print("開始滾動檢查...", color='light_cyan')
         
         # 連接到視窗
         app = PywinautoApp(backend="uia").connect(handle=hwnd)
@@ -380,7 +388,7 @@ def scroll_to_file(file, list_area, hwnd):
         
         # 獲取目標檔案名稱
         target_name = file.window_text()
-        debug_print(f"目標檔案: {target_name}", color='blue')
+        debug_print(f"目標檔案: {target_name}", color='light_blue', bold=True)
 
         # 獲取三個列表的檔案
         morning_files = get_list_items_by_id(main_window, 'morning')
@@ -402,7 +410,7 @@ def scroll_to_file(file, list_area, hwnd):
                 target_list = list_type
                 target_index = index
                 target_list_id = list_id
-                debug_print(f"目標檔案在 [{list_type}] 列表，序號: {index}", color='blue')
+                debug_print(f"目標檔案在 [{list_type}] 列表，序號: {index}", color='light_blue', bold=True)
                 break
             except ValueError:
                 continue
@@ -422,7 +430,7 @@ def scroll_to_file(file, list_area, hwnd):
                 if f.is_selected():
                     current_list = list_type
                     current_index = i
-                    debug_print(f"游標選中的檔案在 [{list_type}] 列表，序號: {i}", color='blue')
+                    debug_print(f"游標選中的檔案在 [{list_type}] 列表，序號: {i}", color='light_blue', bold=True)
                     break
             if current_index is not None:
                 break
@@ -447,24 +455,24 @@ def scroll_to_file(file, list_area, hwnd):
                     
                 # 重新獲取目標列表區域
                 list_area = main_window.child_window(auto_id=target_list_id)
-                debug_print("已更新列表區域", color='green')
+                debug_print("已更新列表區域", color='light_green')
                 
                 # 重新檢查檔案可見性
                 if is_file_visible(file, list_area):
-                    debug_print("切換列表後檔案已可見", color='green')
+                    debug_print("切換列表後檔案已可見", color='light_green')
                     return True
                     
                 # 設定當前列表和索引
                 current_list = target_list
                 current_index = target_index  # 設定為目標檔案的索引
-                debug_print(f"更新當前索引為: {current_index}", color='magenta')
+                debug_print(f"更新當前索引為: {current_index}", color='light_magenta')
             else:
                 debug_print("無法識別目標列表類型", color='light_red')
                 return False
                 
         # 檢查是否需要切換列表
         if target_list != current_list:
-            debug_print(f"需要從 [{current_list}] 切換到 [{target_list}]", color='blue')
+            debug_print(f"需要從 [{current_list}] 切換到 [{target_list}]", color='light_blue', bold=True)
             # 切換列表時傳入視窗標題
             if not switch_to_list(hwnd):
                 return False
@@ -472,11 +480,11 @@ def scroll_to_file(file, list_area, hwnd):
             
             # 重新獲取目標列表區域
             list_area = main_window.child_window(auto_id=target_list_id)
-            debug_print("已更新列表區域", color='green')
+            debug_print("已更新列表區域", color='light_green')
             
             # 重新檢查檔案可見性
             if is_file_visible(file, list_area):
-                debug_print("切換列表後檔案已可見", color='green')
+                debug_print("切換列表後檔案已可見", color='light_green')
                 return True
         
         # 設定最大嘗試次數
@@ -493,7 +501,7 @@ def scroll_to_file(file, list_area, hwnd):
             list_type = 'industry'
             
         if list_type:
-            debug_print(f"翻頁前確保 [{target_list}] 列表被選中", color='blue')
+            debug_print(f"翻頁前確保 [{target_list}] 列表被選中", color='light_blue', bold=True)
             if not switch_to_list(hwnd, list_type, next_list=False):
                 debug_print("切換到目標列表失敗", color='light_red')
                 return False
@@ -502,7 +510,7 @@ def scroll_to_file(file, list_area, hwnd):
         # 執行翻頁直到找到檔案
         while attempts < max_attempts:
             if is_file_visible(file, list_area):
-                debug_print("目標檔案已可見", color='green')
+                debug_print("目標檔案已可見", color='light_green')
                 return True
                 
             # 確保視窗在前景
@@ -523,7 +531,7 @@ def scroll_to_file(file, list_area, hwnd):
             
             # 檢查檔案是否可見
             if is_file_visible(file, list_area):
-                debug_print("翻頁後檔案已可見", color='green')
+                debug_print("翻頁後檔案已可見", color='light_green')
                 return True
                 
             attempts += 1
@@ -554,8 +562,8 @@ def is_file_visible(file, list_area):
         file_name = file.window_text()
         
         if not is_visible:
-            debug_print(f"{file_name} 檔案不在可視範圍內 (top={file_rect.top}, bottom={file_rect.bottom})", color='magenta')
-            debug_print(f"列表範圍: top={list_rect.top}, bottom={list_rect.bottom}", color='magenta')
+            debug_print(f"{file_name} 檔案不在可視範圍內 (top={file_rect.top}, bottom={file_rect.bottom})", color='light_magenta')
+            debug_print(f"列表範圍: top={list_rect.top}, bottom={list_rect.bottom}", color='light_magenta')
             
         return is_visible
         
@@ -622,7 +630,7 @@ def switch_to_list(hwnd, list_type=None, next_list=True):
                 window_title=win32gui.GetWindowText(hwnd)
             )
             
-            debug_print(f"已完成列表切換", color='green')
+            debug_print(f"已完成列表切換", color='light_green')
             return True
             
         finally:

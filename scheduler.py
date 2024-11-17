@@ -17,7 +17,7 @@ class Scheduler:
             if current_time.date() > schedule_date.date():
                 return schedule.CancelJob
                 
-        debug_print(f"執行排程任務: {current_time.strftime('%Y-%m-%d %H:%M')}", color='light_blue')
+        debug_print(f"執行排程任務: {current_time.strftime('%Y-%m-%d %H:%M')}", color='light_blue', bold=True)
         self.task_func()
         
         # 如果是單次執行，完成後取消任務
@@ -38,13 +38,13 @@ class Scheduler:
             if schedule_info['type'] == 'daily':
                 # 每日執行
                 schedule.every().day.at(time_str).do(self.run_scheduled_task)
-                debug_print(f"每日排程: {time_str}", color='cyan')
+                debug_print(f"每日排程: {time_str}", color='light_cyan')
                 
             elif schedule_info['type'] == 'weekly':
                 # 每週特定日執行
                 weekday = schedule_info['weekday'].lower()
                 getattr(schedule.every(), weekday).at(time_str).do(self.run_scheduled_task)
-                debug_print(f"每週排程: 每週{weekday} {time_str}", color='cyan')
+                debug_print(f"每週排程: 每週{weekday} {time_str}", color='light_cyan')
                 
             elif schedule_info['type'] == 'once':
                 # 單次執行
@@ -54,7 +54,7 @@ class Scheduler:
                     schedule_type='once',
                     schedule_date=schedule_date
                 )
-                debug_print(f"新增單次排程: {schedule_info['date']} {time_str}", color='cyan')
+                debug_print(f"新增單次排程: {schedule_info['date']} {time_str}", color='light_cyan')
         
         # 啟動排程執行緒
         thread = threading.Thread(target=self._run_scheduler, daemon=True)

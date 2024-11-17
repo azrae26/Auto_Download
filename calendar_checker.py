@@ -49,7 +49,7 @@ class CalendarChecker:
                 control_type=calendar_info['element_info']['control_type']
             )
             
-            debug_print(f"找到 {len(candidates)} 個候選控件", color='cyan')
+            debug_print(f"找到 {len(candidates)} 個候選控件", color='light_cyan')
             
             # 遍歷所有候選控件，找到正確的日曆控件
             for candidate in candidates:
@@ -60,15 +60,15 @@ class CalendarChecker:
                     
                     # 檢查尺寸是否符合（允許5像素的誤差）
                     if (abs(width - 186) <= 5 and abs(height - 162) <= 5):
-                        debug_print(f"檢查控件:", color='cyan')
-                        debug_print(f"寬度: {width}, 高度: {height}", color='cyan')
-                        debug_print(f"類型: {candidate.element_info.control_type}", color='cyan')
-                        debug_print(f"類別: {type(candidate).__name__}", color='cyan')
-                        debug_print(f"類別名稱: {candidate.class_name()}", color='cyan')
+                        debug_print(f"檢查控件:", color='light_cyan')
+                        debug_print(f"寬度: {width}, 高度: {height}", color='light_cyan')
+                        debug_print(f"類型: {candidate.element_info.control_type}", color='light_cyan')
+                        debug_print(f"類別: {type(candidate).__name__}", color='light_cyan')
+                        debug_print(f"類別名稱: {candidate.class_name()}", color='light_cyan')
                         
                         # 找到符合的控件
                         self.calendar = candidate
-                        debug_print("找到符合的日曆控件!", color='green')
+                        debug_print("找到符合的日曆控件!", color='light_green')
                         return True
                         
                 except Exception as e:
@@ -107,12 +107,12 @@ class CalendarChecker:
         x = rect.left + (target_col + 0.5) * cell_width  # x座標（列中心）
         y = rect.top + 52 + (target_row + 0.5) * cell_height  # y座標（從標題區域下方開始）
         
-        debug_print(f"日曆區域: 左={rect.left}, 上={rect.top}, 右={rect.right}, 下={rect.bottom}", color='cyan')
-        debug_print(f"日歷尺寸: 寬={rect.right - rect.left}px, 高={rect.bottom - rect.top}px", color='cyan')
-        debug_print(f"日期區高度: {date_area_height}px, 寬度: {rect.right - rect.left}px", color='cyan')
-        debug_print(f"單元格尺寸: 寬={cell_width:.1f}px, 高={cell_height:.1f}px", color='cyan')
-        debug_print(f"目標位置: 第{target_row + 1}行, 第{target_col + 1}列", color='cyan')
-        debug_print(f"點擊座標: x={int(x)}, y={int(y)}", color='cyan')
+        debug_print(f"日曆區域: 左={rect.left}, 上={rect.top}, 右={rect.right}, 下={rect.bottom}", color='light_cyan')
+        debug_print(f"日歷尺寸: 寬={rect.right - rect.left}px, 高={rect.bottom - rect.top}px", color='light_cyan')
+        debug_print(f"日期區高度: {date_area_height}px, 寬度: {rect.right - rect.left}px", color='light_cyan')
+        debug_print(f"單元格尺寸: 寬={cell_width:.1f}px, 高={cell_height:.1f}px", color='light_cyan')
+        debug_print(f"目標位置: 第{target_row + 1}行, 第{target_col + 1}列", color='light_cyan')
+        debug_print(f"點擊座標: x={int(x)}, y={int(y)}", color='light_cyan')
         
         return int(x), int(y)
 
@@ -127,8 +127,8 @@ class CalendarChecker:
                 debug_print("無法計算點擊位置")
                 return False
                 
-            debug_print(f"今天是 {datetime.now().day} 號", color='blue') # 印出今日日期
-            debug_print(f"計算得出的點擊位置: x={x}, y={y}", color='blue') # 印出計算得出的點擊位置
+            debug_print(f"今天是 {datetime.now().day} 號", color='light_blue', bold=True) # 印出今日日期
+            debug_print(f"計算得出的點擊位置: x={x}, y={y}", color='light_blue', bold=True) # 印出計算得出的點擊位置
             
             # 標記為程式移動
             is_program_moving = True
@@ -187,7 +187,7 @@ def start_calendar_checker(days_ago=0):
     global is_program_moving  # 添加這行
     
     try:
-        debug_print("開始檢測日歷元素並點選今日日期...", color='cyan')
+        debug_print("開始檢測日歷元素並點選今日日期...", color='light_cyan')
         
         # 標記為程式移動
         is_program_moving = True
@@ -216,12 +216,12 @@ def start_calendar_checker(days_ago=0):
                 debug_print("無法找到日歷元素")
                 return False
             
-            debug_print("找到日歷元素!", color='blue')
+            debug_print("找到日歷元素!", color='light_blue', bold=True)
 
             # 點擊日期
             if checker.click_date(days_ago):
                 try:
-                    debug_print(f"日歷可見性: {checker.calendar.is_visible()}", color='blue')
+                    debug_print(f"日歷可見性: {checker.calendar.is_visible()}", color='light_blue', bold=True)
                     return True
                 except Exception as e:
                     debug_print(f"獲取日歷資訊時發生錯誤: {str(e)}")
@@ -253,10 +253,10 @@ def start_click_calendar_blank():
             debug_print("無法找到日歷元素")
             return False
         
-        debug_print("找到日歷元素!", color='blue')
+        debug_print("找到日歷元素!", color='light_blue', bold=True)
         if checker.click_calendar_blank(): # 點擊日歷空白處
             try:
-                debug_print(f"日歷可見性: {checker.calendar.is_visible()}", color='blue')
+                debug_print(f"日歷可見性: {checker.calendar.is_visible()}", color='light_blue', bold=True)
                 return True
             except Exception as e:
                 debug_print(f"獲取日歷資訊時發生錯誤: {str(e)}")

@@ -135,11 +135,11 @@ class ChromeMonitor:
 def start_chrome_monitor(existing_monitor=None):
     """啟動或切換檔案監控"""
     if existing_monitor and existing_monitor.is_monitoring:
-        debug_print("停止檔案監控...", color='cyan')
+        debug_print("停止檔案監控...", color='light_cyan')
         existing_monitor.stop_monitoring()
         return None
     else:
-        debug_print("啟動檔案監控...", color='cyan')
+        debug_print("啟動檔案監控...", color='light_cyan')
         monitor = ChromeMonitor()
         monitor.start_monitoring()
         return monitor

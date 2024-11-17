@@ -29,7 +29,7 @@ class FolderMonitor:
         """輸出今日檔案總數"""
         debug_print("", color='white')
         debug_print("======== 檔案統計 ========", color='yellow')
-        debug_print(f"     今日檔案總數: {total_count}", color='green')
+        debug_print(f"     今日檔案總數: {total_count}", color='light_green')
     
     def log_date_statistics(self, date_counts):
         """輸出日期數量統計"""
@@ -38,12 +38,12 @@ class FolderMonitor:
         for date, count in sorted_dates:
             month, day = date.split('/')
             weekday = self.weekdays[datetime.strptime(f"2024{month}{day}", "%Y%m%d").strftime('%A')] # 取得星期幾
-            debug_print(f"{month} / {day} （{weekday}）：{count} 個檔案", color='cyan')
+            debug_print(f"{month} / {day} （{weekday}）：{count} 個檔案", color='light_cyan')
         debug_print("==========================", color='yellow')
     
     def log_new_file(self, filename):
         """輸出新發現的檔案"""
-        debug_print(f"發現新檔案: {filename}", color='green')
+        debug_print(f"發現新檔案: {filename}", color='light_green')
 
     def scan_new_files(self):
         """掃描今日新檔案"""
@@ -88,19 +88,19 @@ class FolderMonitor:
             lists_dict = {
                 '今日': today_list or [],
                 '昨日': yesterday_list or [],
-                '上週': last_week_list or [],
-                '上上週': last_2week_list or [],
-                '上上上週': last_3week_list or [],
-                '上上上上週': last_4week_list or []
+                '1週前': last_week_list or [],
+                '2週前': last_2week_list or [],
+                '4週前': last_3week_list or [],
+                '8週前': last_4week_list or []
             }
 
             # 分析列表內容
-            debug_print("=== 各時間點列表分析 ===", color='cyan')
+            debug_print("=== 各時間點列表分析 ===", color='light_cyan')
             total_files = 0
             for date_name, file_list in lists_dict.items():
                 file_count = len(file_list) if file_list else 0
                 total_files += file_count
-                debug_print(f"[{date_name}] 列表檔案數: {file_count}", color='blue')
+                debug_print(f"[{date_name}] 列表檔案數: {file_count}", color='light_blue', bold=True)
                 for file in file_list:
                     if file:  # 確保檔案名稱不是空的
                         debug_print(f"- {file}", color='white')
@@ -134,13 +134,13 @@ class FolderMonitor:
             date_mapping = {
                 '今日': today,
                 '昨日': today - timedelta(days=1),
-                '上週': today - timedelta(days=7),
-                '上上週': today - timedelta(days=14),
-                '上上上週': today - timedelta(days=21),
-                '上上上上週': today - timedelta(days=28)
+                '1週前': today - timedelta(days=7),
+                '2週前': today - timedelta(days=14),
+                '4週前': today - timedelta(days=28),
+                '8週前': today - timedelta(days=56)
             }
             
-            debug_print("=== 檔案數列表 ===", color='cyan')
+            debug_print("=== 檔案數列表 ===", color='light_cyan')
             
             # 預先處理列表檔案名稱
             normalized_lists = {}
@@ -148,7 +148,7 @@ class FolderMonitor:
             for date_name, date in date_mapping.items():
                 file_list = list_files_dict.get(date_name, [])
                 weekday = self.weekdays[date.strftime('%A')]
-                debug_print(f"{date_name} ({date.strftime('%m/%d')} {weekday}) 列表檔案數: {len(file_list)}", color='blue')
+                debug_print(f"{date_name} ({date.strftime('%m/%d')} {weekday}) 列表檔案數: {len(file_list)}", color='light_blue', bold=True)
                 
                 if file_list:
                     normalized_lists[date_name] = [
@@ -165,7 +165,7 @@ class FolderMonitor:
             matching_results = {}
             
             # 分析每個新檔案
-            debug_print("=== 檔案匹配詳情 ===", color='cyan')
+            debug_print("=== 檔案匹配詳情 ===", color='light_cyan')
             for new_file in new_files:
                 matches = []
                 normalized_new_file = self._normalize_filename(new_file)
@@ -180,21 +180,21 @@ class FolderMonitor:
                 debug_print(f"檔案: {new_file}", color='white')
                 if matches:
                     match_dates = [f"{name} ({date_mapping[name].strftime('%m/%d')})" for name in matches]
-                    debug_print(f"匹配: {', '.join(match_dates)}", color='magenta')
+                    debug_print(f"匹配: {', '.join(match_dates)}", color='light_magenta')
                 else:
                     debug_print("未匹配任何列表", color='light_red')
                 
                 matching_results[new_file] = matches
             
             # 輸出匹配統計
-            debug_print("=== 新檔案統計 ===", color='cyan')
+            debug_print("=== 新檔案配統計 ===", color='light_cyan')
             debug_print(f"今日總共有 {len(new_files)} 個新檔案", color='yellow')
             for date_name, count in match_stats.items():
                 date = date_mapping[date_name]
                 weekday = self.weekdays[date.strftime('%A')]
                 debug_print(f"{date_name} ({date.strftime('%m/%d')} {weekday}) 新檔案數: {count}", color='yellow')
             
-            debug_print("=== 分析完成 ===", color='cyan')
+            debug_print("=== 分析完成 ===", color='light_cyan')
             return matching_results
 
         except Exception as e:

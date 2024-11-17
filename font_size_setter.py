@@ -31,7 +31,7 @@ def set_font_size():
         main_window = app.window(handle=hwnd)
         combo = main_window.child_window(title="字型大小:", control_type="ComboBox")
         
-        debug_print("開始設定字型大小...", color='cyan')
+        debug_print("開始設定字型大小...", color='light_cyan')
         
         # 點擊下拉選單右側按鈕
         rect = combo.rectangle()
