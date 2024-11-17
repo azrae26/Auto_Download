@@ -2,9 +2,11 @@ import win32gui
 import win32con
 from pywinauto.application import Application
 import time
-from utils import debug_print, ensure_foreground_window, calculate_center_position
+from utils import (debug_print, ensure_foreground_window, calculate_center_position, 
+                  program_moving_context, check_mouse_before_move)
 import pyautogui
 
+@check_mouse_before_move
 def set_font_size():
     """設定字型大小"""
     try:
@@ -44,28 +46,29 @@ def set_font_size():
         click_x = rect.right - 10
         click_y = center_y
         
-        # 移動滑鼠到按鈕位置
-        pyautogui.moveTo(click_x, click_y, duration=0.2)
-        time.sleep(0.5)
-        
-        # 第一次點擊展開下拉選單
-        pyautogui.click()
-        time.sleep(1)
-        
-        # 按向下鍵
-        pyautogui.press('down')
-        time.sleep(2)
-        
-        # 按向上鍵
-        pyautogui.press('up')
-        time.sleep(1)
-        
-        # 再次點擊收起下拉選單
-        pyautogui.click()
+        with program_moving_context():
+            # 移動滑鼠到按鈕位置
+            pyautogui.moveTo(click_x, click_y, duration=0.2)
+            time.sleep(0.5)
+            
+            # 第一次點擊展開下拉選單
+            pyautogui.click()
+            time.sleep(1)
+            
+            # 按向下鍵
+            pyautogui.press('down')
+            time.sleep(2)
+            
+            # 按向上鍵
+            pyautogui.press('up')
+            time.sleep(1)
+            
+            # 再次點擊收起下拉選單
+            pyautogui.click()
         
         debug_print("字型大小設定完成")
         return True
         
     except Exception as e:
-        debug_print(f"設定字型大小時發生錯誤: {str(e)}")
+        debug_print(f"設定字型大小時發生錯誤: {str(e)}", color='light_red')
         return False

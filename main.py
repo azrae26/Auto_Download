@@ -16,7 +16,7 @@ from utils import (debug_print, find_window_handle, ensure_foreground_window,
                   get_list_items_by_id, calculate_center_position, refresh_checking, 
                   start_refresh_check, stop_refresh_check, click_at, move_to_safe_position, 
                   check_mouse_movement, scroll_to_file, is_file_visible, switch_to_list, 
-                  reset_mouse_position)
+                  reset_mouse_position, check_mouse_before_move)
 from scheduler import Scheduler
 from font_size_setter import set_font_size
 from chrome_monitor import start_chrome_monitor
@@ -37,23 +37,23 @@ class FileProcessor:
         if count <= 0:
             return
                 
-        time.sleep(Config.CLOSE_WINDOW_INTERVAL * 3)  # 等待 0.3 秒視窗完全打開
+        time.sleep(Config.CLOSE_WINDOW_INTERVAL * 3)  # 等待時間確保視窗完全打開
         
         try:
             # 按下 CTRL
             keyboard.press('ctrl')
-            time.sleep(Config.CLOSE_WINDOW_INTERVAL)  # 等待 0.1 秒確保 CTRL 被按下
+            time.sleep(Config.CLOSE_WINDOW_INTERVAL * 3)  # 等待時間確保 CTRL 被按下
             
             # 按指定次數的 W
             for _ in range(count):
                 keyboard.press('w')
-                time.sleep(Config.CLOSE_WINDOW_INTERVAL)  # 間隔 0.1 秒
+                time.sleep(Config.CLOSE_WINDOW_INTERVAL)  # 間隔時間
                 keyboard.release('w')
-                time.sleep(Config.CLOSE_WINDOW_INTERVAL)  # 間隔 0.1 秒
+                time.sleep(Config.CLOSE_WINDOW_INTERVAL)  # 間隔時間
             
             # 釋放 CTRL
             keyboard.release('ctrl')
-            time.sleep(Config.CLOSE_WINDOW_INTERVAL)  # 等待 0.1 秒所有視窗關閉
+            time.sleep(Config.CLOSE_WINDOW_INTERVAL)  # 等待時間確保所有視窗關閉
             
         except Exception as e:
             debug_print(f"關閉視窗時發生錯誤: {str(e)}", color='light_red')
@@ -166,36 +166,41 @@ class FileProcessor:
                                 debug_print(f"無法使檔案 '{file_name}' 進入可視範圍，跳過")
                                 continue
                         
-                        # 執行點擊
+                        # 執行點擊並檢查結果
                         rect = file.rectangle()
                         center_x, center_y = calculate_center_position(rect)
                         if center_x is None or center_y is None:
                             debug_print("無法計算檔案位置，跳過此檔案")
                             continue
                         
-                        click_at(
+                        if click_at(
                             center_x, 
                             center_y, 
                             clicks=2, 
-                            interval=Config.SLEEP_INTERVAL * 0.5, 
+                            interval=Config.DOWNLOAD_INTERVAL, 
                             is_first_click=is_first_click, 
                             hwnd=hwnd, 
                             window_title=window_title,
                             expected_text=file_name
-                        )
-                        debug_print(f"下載完成: {file_name}", color='white')
-                        
-                        if is_first_click:
-                            is_first_click = False
-                            time.sleep(Config.SLEEP_INTERVAL * 5)
-                        else:
-                            click_count += 1
-                            if click_count >= Config.CLICK_BATCH_SIZE:
-                                self.close_windows(Config.CLICK_BATCH_SIZE)
-                                click_count = 0
+                        ):  # 只有在點擊成功時才執行後續操作
+                            debug_print(f"下載完成: {file_name}", color='white')
+                            
+                            # 如果這是第一次點擊，多等待一段時間
+                            if is_first_click:
+                                is_first_click = False
+                                time.sleep(Config.SLEEP_INTERVAL * 5)
+                            else:
+                                click_count += 1
+                                # 如果達到批次大小，關閉視窗
+                                if click_count >= Config.CLICK_BATCH_SIZE:
+                                    self.close_windows(Config.CLICK_BATCH_SIZE)
+                                    click_count = 0
 
-                        downloaded_files.add(file_name)
-                        
+                            downloaded_files.add(file_name)  # 只有在點擊成功時才加入下載清單
+                        else:
+                            debug_print(f"下載失敗: {file_name}", color='light_red')
+                            continue  # 如果點擊失敗，跳過後續操作
+
                         if self.is_last_file_in_list(file, area_index, all_files):
                             if area_index == len(valid_areas) - 1:
                                 debug_print(f"已經是最後一個列表，跳過切換", color='yellow')

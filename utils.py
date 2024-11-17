@@ -263,6 +263,56 @@ def check_mouse_movement():
         
     return has_moved
 
+def check_mouse_before_move(func=None, retry_times=None):
+    """檢查滑鼠移動的裝飾器，支持重試次數設定"""
+    def decorator(f):
+        def wrapper(*args, **kwargs):
+            if retry_times is not None:
+                retry_count = 0
+                while retry_count < retry_times:
+                    # 檢查開始時的滑鼠位置
+                    initial_pos = win32api.GetCursorPos()
+                    time.sleep(0.1)
+                    
+                    # 檢查是否是程式移動
+                    if is_program_moving:
+                        result = f(*args, **kwargs)  # 如果是程式移動，直接執行函數
+                        return result
+                    
+                    # 再次檢查，確保滑鼠真的停止移動
+                    current_pos = win32api.GetCursorPos()
+                    if (abs(current_pos[0] - initial_pos[0]) >= 3 or 
+                        abs(current_pos[1] - initial_pos[1]) >= 3):
+                        debug_print("檢測到滑鼠移動，暫停 2 秒後重試", color='light_red')
+                        time.sleep(2)
+                        retry_count += 1
+                        continue
+                        
+                    # 執行函數，在執行過程中不檢查滑鼠移動
+                    try:
+                        result = f(*args, **kwargs)
+                        return result
+                    except Exception as e:
+                        debug_print(f"操作過程中發生錯誤: {str(e)}", color='light_red')
+                        retry_count += 1
+                        continue
+                        
+                debug_print(f"已達最大重試次數 {retry_times}，放棄此次操作", color='light_red')
+                return False
+            else:
+                # 沒有設定重試次數的情況
+                if not is_program_moving and check_mouse_movement():
+                    debug_print("檢測到滑鼠移動，暫停 2 秒", color='light_red')
+                    time.sleep(2)
+                    return False
+                return f(*args, **kwargs)
+        return wrapper
+    
+    if func:
+        return decorator(func)
+    return decorator
+
+@check_mouse_before_move
 def move_to_safe_position():
     """移動到安全位置"""
     with program_moving_context():
@@ -324,79 +374,56 @@ def check_target_element(hwnd, x, y, expected_text=None):
         debug_print(f"檢查元素時發生錯誤: {str(e)}", color='light_red')
         return False
 
-def click_at(x, y, is_first_click=False, clicks=1, interval=SLEEP_INTERVAL, sleep_interval=None, hwnd=None, window_title=None, expected_text=None):
+@check_mouse_before_move(retry_times=2)  # 使用裝飾器，設定重試次數為2
+def click_at(x, y, is_first_click=False, clicks=1, interval=Config.DOUBLE_CLICK_INTERVAL, sleep_interval=None, hwnd=None, window_title=None, expected_text=None):
     """使用 win32api 進行點擊，並檢查元素文字"""
     global last_mouse_pos
     
-    try: 
-        max_retries = 2  # 最大重試次數
-        retry_count = 0
+    try:
+        # 確保視窗在前景
+        if not ensure_foreground_window(hwnd, window_title):
+            debug_print("視窗不在前景，重新嘗試點擊", color='light_red')
+            return False
         
-        while retry_count < max_retries:
-            # 檢查滑鼠移動
-            if check_mouse_movement():  # 移回原來的檢查方式
-                debug_print("檢測到滑鼠移動，暫停 2 秒後重試", color='light_red')
-                time.sleep(2)
-                retry_count += 1
-                continue
+        with program_moving_context():
+            # 使用 pyautogui 平滑移動滑鼠
+            pyautogui.moveTo(x, y, duration=0.1)  # 使用 duration 參數實現平滑移動
             
-            # 確保視窗在前景
-            if not ensure_foreground_window(hwnd, window_title):
-                debug_print("視窗不在前景，重新嘗試點擊", color='light_red')
-                retry_count += 1
-                continue
+            # 更新位置
+            current_pos = pyautogui.position()
+            last_mouse_pos = current_pos
             
-            with program_moving_context():  # 使用上下文管理器
-                # 移動滑鼠到目標位置
-                win32api.SetCursorPos((x, y))
-                time.sleep(interval * 0.1)
+            # 計算絕對座標
+            normalized_x = int(x * 65535 / win32api.GetSystemMetrics(0))
+            normalized_y = int(y * 65535 / win32api.GetSystemMetrics(1))
+            
+            # 執行點擊
+            for _ in range(clicks):
+                win32api.mouse_event(win32con.MOUSEEVENTF_ABSOLUTE | win32con.MOUSEEVENTF_MOVE, 
+                                   normalized_x, normalized_y, 0, 0)
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
                 
-                # 更新位置
-                current_pos = pyautogui.position()
-                last_mouse_pos = current_pos
-                
-                # 計算絕對座標
-                normalized_x = int(x * 65535 / win32api.GetSystemMetrics(0))
-                normalized_y = int(y * 65535 / win32api.GetSystemMetrics(1))
-                
-                # 執行點擊
-                for _ in range(clicks):
-                    win32api.mouse_event(win32con.MOUSEEVENTF_ABSOLUTE | win32con.MOUSEEVENTF_MOVE, 
-                                       normalized_x, normalized_y, 0, 0)
-                    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                    
-                    # 在按下和彈起之間檢查目標元素
-                    if expected_text and not check_target_element(hwnd, x, y, expected_text):
-                        debug_print(f"重新嘗試點擊", color='light_red')
-                        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                        success = False
-                        break
-                    
-                    # 確保視窗在前景
-                    if not ensure_foreground_window(hwnd, window_title):
-                        debug_print("視窗不在前景，重新嘗試點擊", color='light_red')
-                        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                        success = False
-                        break
-                    
+                # 在按下和彈起之間檢查目標元素
+                if expected_text and not check_target_element(hwnd, x, y, expected_text):
+                    debug_print(f"重新嘗試點擊", color='light_red')
                     win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                    
-                    success = True
-                    
-                    if clicks > 1:
-                        time.sleep(interval * 3)
+                    return False  # 如果檢查失敗，直接返回 False
                 
-                if success:
-                    # 點擊後等待時間，第一次點擊等待時間
-                    time.sleep(sleep_interval or (interval * (5 if is_first_click else 0.5)))
-                    return True
-                else:
-                    retry_count += 1
-                    continue
+                # 確保視窗在前景
+                if not ensure_foreground_window(hwnd, window_title):
+                    debug_print("視窗不在前景，重新嘗試點擊", color='light_red')
+                    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                    return False  # 如果視窗不在前景，直接返回 False
+                
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                
+                if clicks > 1:
+                    time.sleep(interval)
             
-        debug_print(f"已達最大重試次數 {max_retries}，放棄此次點擊", color='light_red')
-        return False
-                    
+            # 點擊後等待時間，第一次點擊等待時間
+            time.sleep(sleep_interval or (interval * (5 if is_first_click else 0.5)))
+            return True  # 只有所有操作都成功才返回 True
+                
     except Exception as e:
         debug_print(f"點擊操作時發生錯誤: {str(e)}", color='light_red')
         return False
@@ -499,9 +526,14 @@ def scroll_to_file(file, list_area, hwnd):
                 
         # 檢查是否需要切換列表
         if target_list != current_list:
-            debug_print(f"需要從 [{current_list}] 切換到 [{target_list}]", color='light_blue', bold=True)
-            # 切換列表時傳入視窗標題
-            if not switch_to_list(hwnd):
+            debug_print(f"需要從 [{current_list}] 切換到 [{target_list}]", color='blue', bold=True)
+            # 根據目標檔案位置決定點擊位置
+            press_position = 'top' if target_index < current_index else 'bottom'
+            debug_print(f"目標檔案在上方，點擊列表{press_position}", color='yellow') if press_position == 'top' else \
+            debug_print(f"目標檔案在下方，點擊列表{press_position}", color='yellow')
+            
+            # 切換列表時傳入點擊位置參數
+            if not switch_to_list(hwnd, press_list_top_or_bottom=press_position):
                 return False
             time.sleep(0.2)  # 等待列表切換完成
             
@@ -514,10 +546,6 @@ def scroll_to_file(file, list_area, hwnd):
                 debug_print("切換列表後檔案已可見", color='light_green')
                 return True
         
-        # 設定最大嘗試次數
-        max_attempts = 10
-        attempts = 0
-        
         # 在開始翻頁前，確保目標列表被選中
         list_type = None
         if target_list == '晨會報告':
@@ -528,11 +556,17 @@ def scroll_to_file(file, list_area, hwnd):
             list_type = 'industry'
             
         if list_type:
-            debug_print(f"翻頁前確保 [{target_list}] 列表被選中", color='light_blue', bold=True)
-            if not switch_to_list(hwnd, list_type, next_list=False):
+            debug_print(f"翻頁前確保 [{target_list}] 列表被選中", color='blue', bold=True)
+            # 根據目標檔案位置決定點擊位置
+            press_position = 'top' if target_index < current_index else 'bottom'
+            if not switch_to_list(hwnd, list_type, next_list=False, press_list_top_or_bottom=press_position):
                 debug_print("切換到目標列表失敗", color='light_red')
                 return False
             time.sleep(0.1)  # 等待列表切換完成
+        
+        # 設定最大嘗試次數
+        max_attempts = 10
+        attempts = 0
         
         # 執行翻頁直到找到檔案
         while attempts < max_attempts:
@@ -598,12 +632,13 @@ def is_file_visible(file, list_area):
         debug_print(f"檢查檔案可見性時發生錯誤: {str(e)}", color='light_red')
         return False
 
-def switch_to_list(hwnd, list_type=None, next_list=True):
+def switch_to_list(hwnd, list_type=None, next_list=True, press_list_top_or_bottom=None):
     """
     點擊切換到指定列表或下一個列表
     hwnd: 視窗句柄
     list_type: 'morning'|'research'|'industry' 指定要切換到哪個列表
     next_list: True=切換到下一個列表, False=切換到指定列表
+    press_list_top_or_bottom: 'top'|'bottom' 指定要按列表的頂部或底部
     """
     global is_program_moving  # 添加這行
     
@@ -643,9 +678,16 @@ def switch_to_list(hwnd, list_type=None, next_list=True):
                 rect = target_list.rectangle()
                 debug_print(f"切換到{list_name}列表", color='yellow')
 
-            # 計算點擊位置（列表頂部往下 10px 的位置）
+            # 計算列表中心點的 x 座標
             center_x = (rect.left + rect.right) // 2
-            click_y = rect.top + 10
+
+            # 計算點擊位置（列表頂部往下 10px 或底部往上 10px 或列表中心點的位置）
+            if press_list_top_or_bottom == 'top':
+                click_y = rect.top + 10
+            elif press_list_top_or_bottom == 'bottom':
+                click_y = rect.bottom - 10
+            else:
+                click_y = (rect.top + rect.bottom) // 2
             
             # 移動到位置並點擊
             click_at(
@@ -668,9 +710,10 @@ def switch_to_list(hwnd, list_type=None, next_list=True):
         debug_print(f"切換列表時發生錯誤: {str(e)}", color='light_red')
         return False
 
+# 修改 safe_click 函數，使用裝飾器
+@check_mouse_before_move
 def safe_click(x=None, y=None):
     """安全的點擊移動並操作，使用上下文管理器"""
-
     with program_moving_context():
         if x is not None and y is not None:
             pyautogui.click(x, y)

@@ -6,7 +6,8 @@ class Config:
     CLICK_BATCH_SIZE = 10  # 批次下載檔案數量
     SLEEP_INTERVAL = 0.05  # 基本等待時間
     DOUBLE_CLICK_INTERVAL = 0.05  # 雙擊間隔
-    CLOSE_WINDOW_INTERVAL = 0.05  # 關閉視窗間隔
+    DOWNLOAD_INTERVAL = 0.01  # 下載間隔
+    CLOSE_WINDOW_INTERVAL = 0.1  # 關閉視窗間隔
     CLICK_INTERVAL = 0.6  # 連續點擊間隔
     MOUSE_MAX_OFFSET = 100  # 滑鼠最大偏移量
     TARGET_WINDOW = "DostocksBiz"

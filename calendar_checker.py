@@ -4,7 +4,7 @@ from datetime import datetime
 import pyautogui
 import time
 from utils import (debug_print, find_window_handle, ensure_foreground_window, 
-                  calculate_center_position, program_moving_context)
+                  calculate_center_position, program_moving_context, check_mouse_before_move)
 from config import Config, COLORS
 from control_info import get_calendar_info
 
@@ -116,19 +116,19 @@ class CalendarChecker:
         
         return int(x), int(y)
 
+    @check_mouse_before_move
     def click_date(self, days_ago):
         """點擊某日日期"""
         try:
-            rect = self.calendar.rectangle() # 獲取日歷元素的矩形範圍
-            x, y = self.calculate_click_position(days_ago) # 計算點擊位置
+            rect = self.calendar.rectangle()
+            x, y = self.calculate_click_position(days_ago)
             if x is None or y is None:
                 debug_print("無法計算點擊位置")
                 return False
                 
-            debug_print(f"今天是 {datetime.now().day} 號", color='light_blue', bold=True) # 印出今日日期
-            debug_print(f"計算得出的點擊位置: x={x}, y={y}", color='light_blue', bold=True) # 印出計算得出的點擊位置
+            debug_print(f"今天是 {datetime.now().day} 號", color='light_blue', bold=True)
+            debug_print(f"計算得出的點擊位置: x={x}, y={y}", color='light_blue', bold=True)
             
-            # 只在實際點擊時使用上下文管理器
             with program_moving_context():
                 # 執行三次點擊
                 for _ in range(3):
@@ -141,23 +141,16 @@ class CalendarChecker:
         except Exception as e:
             debug_print(f"點擊日期時發生錯誤: {str(e)}")
             return False
-    
+
+    @check_mouse_before_move
     def click_calendar_blank(self):
         """點擊日歷空白處"""
-        global is_program_moving  # 添加這行
-        
         try:
-            rect = self.calendar.rectangle() # 獲取日歷元素的矩形範圍
+            rect = self.calendar.rectangle()
+            x = rect.left + 140
+            y = rect.top + 10
             
-            # 計算日歷空白處的位置 (選擇右下角)
-            x = rect.left + 140 # 右邊界向右140像素
-            y = rect.top + 10 # 上邊界向下10像素
-            
-            # 標記為程式移動
-            is_program_moving = True
-            
-            try:
-                # 執行點擊 2 次
+            with program_moving_context():
                 pyautogui.click(x, y)
                 time.sleep(self.CLICK_DELAY)
                 pyautogui.click(x, y)
@@ -166,12 +159,8 @@ class CalendarChecker:
                 debug_print("已點擊日歷空白處", color='yellow')
                 return True
                 
-            finally:
-                is_program_moving = False  # 確保標記被重置
-                
         except Exception as e:
             debug_print(f"點擊日歷空白處時發生錯誤: {str(e)}")
-            is_program_moving = False  # 確保發生錯誤時重設標記
             return False
 
 def start_calendar_checker(days_ago=0):

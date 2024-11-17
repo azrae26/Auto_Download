@@ -5,8 +5,9 @@ from pywinauto.application import Application as PywinautoApp
 from datetime import datetime
 import time
 from utils import (debug_print, find_window_handle, ensure_foreground_window, 
-                  get_list_items_by_id)
+                  get_list_items_by_id, check_mouse_before_move, program_moving_context)
 from config import Config, COLORS  # 添加這行
+import pyautogui
 
 # 全域變數用於控制停止
 should_stop = False
