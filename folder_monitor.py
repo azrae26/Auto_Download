@@ -151,13 +151,15 @@ class FolderMonitor:
                 debug_print(f"{date_name} ({date.strftime('%m/%d')} {weekday}) 列表檔案數: {len(file_list)}", color='light_blue', bold=True)
                 
                 if file_list:
-                    normalized_lists[date_name] = [
-                        self._normalize_filename(str(file_name)) 
-                        for file_name in file_list 
-                        if file_name
-                    ]
+                    # 格式化列表中的每個檔案名稱
+                    normalized_lists[date_name] = [] # 初始化列表
+                    for file_name in file_list:
+                        if file_name:
+                            normalized_name = self._normalize_filename(str(file_name), has_extension=False) # 格式化檔名
+                            normalized_lists[date_name].append(normalized_name) # 存入格式化後的檔名
+                            # 輸出格式化前後的檔名以便除錯
+                            debug_print(f"檔案: 原始={file_name} -> 格式化={normalized_name}", color='white')
                 else:
-                    # 如果時間點沒有檔案，則設為空列表
                     normalized_lists[date_name] = []
             
             # 初始化匹配統計
@@ -168,7 +170,10 @@ class FolderMonitor:
             debug_print("=== 檔案匹配詳情 ===", color='light_cyan')
             for new_file in new_files:
                 matches = []
-                normalized_new_file = self._normalize_filename(new_file)
+                normalized_new_file = self._normalize_filename(new_file, has_extension=True)
+                # 輸出格式化前後的檔名以便除錯
+                debug_print(f"\n檔案: {new_file}", color='white')
+                debug_print(f"格式化後: {normalized_new_file}", color='white')
                 
                 # 比對每個時間點的列表
                 for date_name, normalized_file_list in normalized_lists.items():
@@ -176,8 +181,6 @@ class FolderMonitor:
                         matches.append(date_name)
                         match_stats[date_name] += 1
                 
-                # 輸出個別檔案的匹配結果
-                debug_print(f"檔案: {new_file}", color='white')
                 if matches:
                     match_dates = [f"{name} ({date_mapping[name].strftime('%m/%d')})" for name in matches]
                     debug_print(f"匹配: {', '.join(match_dates)}", color='light_magenta')
@@ -201,20 +204,22 @@ class FolderMonitor:
             debug_print(f"分析檔案匹配時發生錯誤: {str(e)}", color='light_red')
             return {}
 
-    def _normalize_filename(self, filename):
-        """標準化檔名以便比對"""
-        # 移除副檔名
-        if '.' in filename:
-            filename = filename.rsplit('.', 1)[0]
-        
-        # 移除路徑（如果有）
-        filename = filename.split('\\')[-1]
-        
-        # 移除所有特殊符號和空白
-        # 保留中文、英文、數字
-        filename = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9]', '', filename)
-        
-        return filename.lower()  # 轉為小寫以忽略大小寫差異
+    def _normalize_filename(self, filename, has_extension=False):
+        """
+        標準化檔名以便比對，只保留中文、英文、數字
+        Args:
+            filename: 要處理的檔名
+            has_extension: 是否包含副檔名，True=需要移除副檔名，False=不需要移除副檔名
+        """
+        try:
+            # 1. 如果有副檔名且需要移除，則移除最後一個點及其後的所有字元
+            name = re.split(r'\.[^.]*$', filename)[0] if has_extension else filename
+            
+            # 2. 移除所有非中英數字元
+            return re.sub(r'[^a-zA-Z0-9\u4e00-\u9fff]+', '', name)
+        except Exception as e:
+            debug_print(f"標準化檔名時發生錯誤: {str(e)}", color='light_red')
+            return filename
 
     def scan_new_files_and_log(self):
         """掃描今日新檔案，並在啟動及檔案數量變化時輸出統計"""

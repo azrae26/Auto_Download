@@ -4,7 +4,7 @@ from datetime import datetime
 import pyautogui
 import time
 from utils import (debug_print, find_window_handle, ensure_foreground_window, 
-                  calculate_center_position, program_moving_context, check_mouse_before_move)
+                  calculate_center_position, program_moving_context, check_mouse_before_move, click_at)
 from config import Config, COLORS
 from control_info import get_calendar_info
 
@@ -130,10 +130,8 @@ class CalendarChecker:
             debug_print(f"計算得出的點擊位置: x={x}, y={y}", color='light_blue', bold=True)
             
             with program_moving_context():
-                # 執行三次點擊
-                for _ in range(3):
-                    pyautogui.click(x, y)
-                    time.sleep(self.CLICK_DELAY)
+                click_at(x, y, clicks=3, interval=Config.DOUBLE_CLICK_INTERVAL, 
+                        hwnd=self.hwnd, window_title=self.window_title)
                 
                 debug_print("已執行三次點擊", color='yellow')
                 return True
@@ -151,10 +149,7 @@ class CalendarChecker:
             y = rect.top + 10
             
             with program_moving_context():
-                pyautogui.click(x, y)
-                time.sleep(self.CLICK_DELAY)
-                pyautogui.click(x, y)
-                time.sleep(self.CLICK_DELAY)
+                click_at(x, y, clicks=2, interval=Config.DOUBLE_CLICK_INTERVAL, hwnd=self.hwnd, window_title=self.window_title)
                 
                 debug_print("已點擊日歷空白處", color='yellow')
                 return True
@@ -163,7 +158,8 @@ class CalendarChecker:
             debug_print(f"點擊日歷空白處時發生錯誤: {str(e)}")
             return False
 
-def start_calendar_checker(days_ago=0):
+@ensure_foreground_window
+def start_calendar_checker(days_ago=0, hwnd=None, window_title=None):
     """開始檢測日歷元素並點選日期"""
     try:
         debug_print("開始檢測日歷元素並點選今日日期...", color='light_cyan')
@@ -180,10 +176,6 @@ def start_calendar_checker(days_ago=0):
         # 初始化 CalendarChecker 實例
         checker = CalendarChecker()
         if not checker.find_window():
-            return False
-        
-        if not ensure_foreground_window(hwnd, window_title):
-            debug_print("警告: 無法確保視窗在前景")
             return False
         
         # 找到日歷元素
@@ -208,17 +200,14 @@ def start_calendar_checker(days_ago=0):
         debug_print(f"檢測日歷元素時發生錯誤: {str(e)}", color='light_red')
         return False
 
-def start_click_calendar_blank():
+@ensure_foreground_window
+def start_click_calendar_blank(hwnd=None, window_title=None):
     """開始點擊日歷空白處"""
     try:
         debug_print("開始點擊日歷空白處...", color='yellow')
 
         checker = CalendarChecker()
         if not checker.find_window():
-            return False
-        
-        if not ensure_foreground_window(checker.hwnd, checker.window_title):
-            debug_print("警告: 無法確保視窗在前景")
             return False
             
         if not checker.find_calendar():

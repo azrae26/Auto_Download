@@ -69,49 +69,61 @@ def find_window_handle(target_title=None):
     
     return windows 
 
-def ensure_foreground_window(hwnd, window_title=None, sleep_time=0.2):
+def ensure_foreground_window(func_or_hwnd=None, window_title=None, sleep_time=0.2):
     """
-    確保視窗在前景
-    hwnd: 視窗句柄
-    window_title: 視窗標題（用於日誌）
-    sleep_time: 等待時間（秒）
+    確保視窗在前景，可作為裝飾器或普通函數使用
+    作為裝飾器: @ensure_foreground_window
+    作為函數: ensure_foreground_window(hwnd, window_title)
     """
-    try:
-        # 檢查視窗是否最小化
-        if win32gui.IsIconic(hwnd):
-            window_info = f" '{window_title}'" if window_title else ""
-            debug_print(f"視窗{window_info}已最小化，正在還原...", color='light_cyan')
-            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-            time.sleep(sleep_time)
-        
-        # 獲取當前前景視窗
-        current_hwnd = win32gui.GetForegroundWindow()
-        
-        # 如果已經是前景視窗，直接返回
-        if current_hwnd == hwnd:
-            return True
-            
-        # 嘗試將視窗帶到前景
+    # 作為普通函數使用
+    if not callable(func_or_hwnd):
+        hwnd = func_or_hwnd
         try:
-            # 先激活視窗
-            win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
-            time.sleep(sleep_time)
+            # 檢查視窗是否最小化
+            if win32gui.IsIconic(hwnd):
+                window_info = f" '{window_title}'" if window_title else ""
+                debug_print(f"視窗{window_info}已最小化，正在還原...", color='light_cyan')
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                time.sleep(sleep_time)
             
-            # 模擬 Alt 鍵按下和釋放，這可以幫助切換視窗焦點
-            win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)  # Alt 按下
-            win32gui.SetForegroundWindow(hwnd)
-            win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)  # Alt 釋放
+            # 獲取當前前景視窗
+            current_hwnd = win32gui.GetForegroundWindow()
             
-            time.sleep(sleep_time)
-            return True
-            
+            # 如果已經是前景視窗，直接返回
+            if current_hwnd == hwnd:
+                return True
+                
+            # 嘗試將視窗帶到前景
+            try:
+                win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
+                time.sleep(sleep_time)
+                
+                win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)
+                win32gui.SetForegroundWindow(hwnd)
+                win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
+                
+                time.sleep(sleep_time)
+                return True
+                
+            except Exception as e:
+                debug_print(f"警告: 無法將視窗帶到前景: {str(e)}", color='light_red')
+                return False
+                
         except Exception as e:
-            debug_print(f"警告: 無法將視窗帶到前景: {str(e)}", color='light_red')
+            debug_print(f"確保視窗可見時發生錯誤: {str(e)}", color='light_red')
             return False
-            
-    except Exception as e:
-        debug_print(f"確保視窗可見時發生錯誤: {str(e)}", color='light_red')
-        return False
+    
+    # 作為裝飾器使用
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            hwnd = kwargs.get('hwnd')
+            title = kwargs.get('window_title')
+            if not ensure_foreground_window(hwnd, title, sleep_time):
+                return False
+            return func(*args, **kwargs)
+        return wrapper
+    
+    return decorator(func_or_hwnd) if callable(func_or_hwnd) else decorator
 
 def get_list_items_by_id(main_window, list_type=None):
     """

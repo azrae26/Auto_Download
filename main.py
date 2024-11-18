@@ -319,6 +319,7 @@ class MainApp:
         
         self.stop_esc_listener()  # 操作完成後停止監聽
 
+    @ensure_foreground_window
     def click_daily_report_tab(self, hwnd=None, window_title=None):
         """點擊每日報告標籤"""
         try:
@@ -326,31 +327,20 @@ class MainApp:
             if hwnd is None or window_title is None:
                 hwnd, window_title = self.selected_window or find_window_handle(Config.TARGET_WINDOW)[0]
             
-            # 確保視窗在前景
-            if not ensure_foreground_window(hwnd, window_title):
-                debug_print("警告: 無法確保視窗前景", color='light_red')
-                return False
-                
-            # 連接到視窗
+            # 連接到視窗並找到標籤
             app = PywinautoApp(backend="uia").connect(handle=hwnd)
-            main_window = app.window(handle=hwnd)
+            daily_report_tab = app.window(handle=hwnd).child_window(title="每日報告", control_type="TabItem")
             
-            # 找到每日報告標籤
-            daily_report_tab = main_window.child_window(title="每日報告", control_type="TabItem")
-            
-            # 獲取位置
-            rect = daily_report_tab.rectangle() # 獲取矩形
-            center_x, center_y = calculate_center_position(rect) # 計算中心位置
-            
-            if center_x and center_y:
-                # 雙擊
-                click_at(center_x, center_y, clicks=2, interval=Config.SLEEP_INTERVAL, 
-                                          hwnd=hwnd, window_title=window_title)
-                debug_print("已點擊每日報告標籤", color='yellow')
-                return True
-            else:
-                debug_print("無法獲取每日報告標籤位置")
+            # 使用 calculate_center_position 計算中心點
+            center_x, center_y = calculate_center_position(daily_report_tab.rectangle())
+            if center_x is None or center_y is None:
+                debug_print("無法計算標籤位置")
                 return False
+            
+            click_at(center_x, center_y, clicks=2, interval=Config.SLEEP_INTERVAL, 
+                    hwnd=hwnd, window_title=window_title)
+            debug_print("已點擊每日報告標籤", color='yellow')
+            return True
                 
         except Exception as e:
             debug_print(f"點擊每日報告標籤時發生錯誤: {str(e)}", color='light_red')
@@ -403,23 +393,23 @@ class MainApp:
         
         # 基本步驟
         steps = [
-            ("點擊每日報告標籤", lambda: self.click_daily_report_tab(hwnd, window_title)),
+            ("點擊每日報告標籤", lambda: self.click_daily_report_tab(hwnd=hwnd, window_title=window_title)),
             ("設定字型大小", lambda: set_font_size()),
-            ("點擊今日", lambda: start_calendar_checker(0)),
+            ("點擊今日", lambda: start_calendar_checker(0, hwnd=hwnd, window_title=window_title)),
             ("下載今日檔案，並收集列表", lambda: download_days_weeks(0, 0, '今日')),
-            ("點擊今日", lambda: start_calendar_checker(0)),
+            ("點擊今日", lambda: start_calendar_checker(0, hwnd=hwnd, window_title=window_title)),
             ("下載昨日檔案，並收集列表", lambda: download_days_weeks(1, 0, '昨日')),
-            ("點擊今日", lambda: start_calendar_checker(0)),
+            ("點擊今日", lambda: start_calendar_checker(0, hwnd=hwnd, window_title=window_title)),
             ("下載 1 週前檔案，並收集列表", lambda: download_days_weeks(0, 1, '1週前')),
-            ("點擊日歷空白處", lambda: start_click_calendar_blank()),
+            ("點擊日歷空白處", lambda: start_click_calendar_blank(hwnd=hwnd, window_title=window_title)),
             ("下載 2 週前檔案，並收集列表", lambda: download_days_weeks(0, 1, '2週前')),
-            ("點擊日歷空白處", lambda: start_click_calendar_blank()),
+            ("點擊日歷空白處", lambda: start_click_calendar_blank(hwnd=hwnd, window_title=window_title)),
             ("下載 4 週前檔案，並收集列表", lambda: download_days_weeks(0, 2, '4週前')),
-            ("點擊日歷空白處", lambda: start_click_calendar_blank()),
+            ("點擊日歷空白處", lambda: start_click_calendar_blank(hwnd=hwnd, window_title=window_title)),
             ("下載 8 週前檔案，並收集列表", lambda: download_days_weeks(0, 4, '8週前')),
-            ("點擊日歷空白處", lambda: start_click_calendar_blank()),
+            ("點擊日歷空白處", lambda: start_click_calendar_blank(hwnd=hwnd, window_title=window_title)),
             ("鍵盤向下 X8", lambda: [pyautogui.press('down') or time.sleep(0.2) for _ in range(8)]),
-            ("點擊今日", lambda: start_calendar_checker(0)),
+            ("點擊今日", lambda: start_calendar_checker(0, hwnd=hwnd, window_title=window_title)),
             ("複製今日檔案到指定位置", lambda: self.copy_today_files()),
             ("分析檔案匹配", lambda: folder_monitor.store_and_analyze_lists(
                 today_list=self.collected_lists['今日'],
@@ -579,22 +569,22 @@ class MainApp:
         # 執行步驟
         steps = [
             ("等待 1 秒", lambda: time.sleep(1)),
-            ("點擊每日報告標籤", lambda: self.click_daily_report_tab(hwnd, window_title)),
-            ("點擊今日", lambda: start_calendar_checker(0) or time.sleep(2)),
+            ("點擊每日報告標籤", lambda: self.click_daily_report_tab(hwnd=hwnd, window_title=window_title)),
+            ("點擊今日", lambda: start_calendar_checker(0, hwnd=hwnd, window_title=window_title) or time.sleep(2)),
             ("收集今日列表", lambda: self.collect_current_list('今日', hwnd)),
-            ("向左 1 天", lambda: pyautogui.press('left') or time.sleep(2)),
+            ("向左 1 天", lambda: pyautogui.press('left') or time.sleep(1)), # 向左 1 天，等待 1 秒
             ("收集昨日列表", lambda: self.collect_current_list('昨日', hwnd)),
-            ("點擊今日", lambda: start_calendar_checker(0) or time.sleep(2)),
-            ("向上 1 週", lambda: pyautogui.press('up') or time.sleep(2)),
+            ("點擊今日", lambda: start_calendar_checker(0, hwnd=hwnd, window_title=window_title) or time.sleep(2)),
+            ("向上 1 週", lambda: pyautogui.press('up') or time.sleep(1)), # 向上 1 週，等待 1 秒
             ("收集 1 週前列表", lambda: self.collect_current_list('1週前', hwnd)),
-            ("向上 1 週", lambda: [pyautogui.press('up') or time.sleep(2) for _ in range(1)]),
+            ("向上 1 週", lambda: [pyautogui.press('up') or time.sleep(1) for _ in range(1)]), # 向上 1 週，等待 1 秒
             ("收集 2 週前列表", lambda: self.collect_current_list('2週前', hwnd)),
-            ("向上 2 週", lambda: [pyautogui.press('up') or time.sleep(2) for _ in range(2)]),
+            ("向上 2 週", lambda: [pyautogui.press('up') or time.sleep(1) for _ in range(2)]), # 向上 2 週，等待 1 秒
             ("收集 4 週前列表", lambda: self.collect_current_list('4週前', hwnd)),
-            ("向上 4 週", lambda: [pyautogui.press('up') or time.sleep(2) for _ in range(4)]),
+            ("向上 4 週", lambda: [pyautogui.press('up') or time.sleep(1) for _ in range(4)]), # 向上 4 週，等待 1 秒
             ("收集 8 週前列表", lambda: self.collect_current_list('8週前', hwnd)),
-            ("鍵盤向下 X8", lambda: [pyautogui.press('down') or time.sleep(2) for _ in range(8)]),
-            ("點擊今日", lambda: start_calendar_checker(0)),
+            ("鍵盤向下 X8", lambda: [pyautogui.press('down') or time.sleep(1) for _ in range(8)]), # 鍵盤向下 X8，每次等待 1 秒
+            ("點擊今日", lambda: start_calendar_checker(0, hwnd=hwnd, window_title=window_title)),
             ('分析檔案匹配', lambda: folder_monitor.store_and_analyze_lists(
                 today_list=self.collected_lists['今日'],
                 yesterday_list=self.collected_lists['昨日'],

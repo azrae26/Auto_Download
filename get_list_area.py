@@ -32,6 +32,7 @@ def get_list_items(list_area):
     return list_area.descendants(control_type="ListItem")
 
 def get_list_area():
+    """獲取列表區域"""
     try:
         global should_stop
         reset_stop()  # 重置停止標誌
