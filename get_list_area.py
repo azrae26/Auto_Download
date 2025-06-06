@@ -183,13 +183,10 @@ def list_all_controls():
         for i, control in enumerate(all_controls, 1):
             try:
                 debug_print(f"控件 {i}:")
-                debug_print(f"類型: {control.element_info.control_type}, 類別: {type(control).__name__}")
-                debug_print(f"名稱: {control.window_text()}")
+                debug_print(f"類型: {control.element_info.control_type}, 類別: {type(control).__name__}, 名稱: {control.window_text()}")
                 rect = control.rectangle()
-                debug_print(f"位置: 左={rect.left}, 上={rect.top}, 右={rect.right}, 下={rect.bottom}")
-                debug_print(f"寬度: {rect.width()}, 高度: {rect.height()}")
-                debug_print(f"自動化ID: {control.automation_id()}")
-                debug_print(f"類別名稱: {control.class_name()}")
+                debug_print(f"位置: 左={rect.left}, 上={rect.top}, 右={rect.right}, 下={rect.bottom}, 寬度: {rect.width()}, 高度: {rect.height()}")
+                debug_print(f"自動化ID: {control.automation_id()}, 類別名稱: {control.class_name()}")
                 debug_print(f"可見: {control.is_visible()}")
             except Exception as e:
                 debug_print(f"獲取控件 {i} 資訊時發生錯誤: {str(e)}")

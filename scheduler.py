@@ -54,8 +54,13 @@ class Scheduler:
                     schedule_type='once',
                     schedule_date=schedule_date
                 )
-                debug_print(f"新增單次排程: {schedule_info['date']} {time_str}", color='light_cyan')
-        
+                # 顯示單次排程，如果日期已過則不顯示
+                if datetime.now().date() <= schedule_date.date():
+                    debug_print(f"單次排程: {schedule_info['date']} {time_str}", color='light_cyan')
+        # 輸出今日日期
+        debug_print("==================", color='light_cyan')
+        debug_print(f"今天是 {datetime.now().strftime('%Y-%m-%d')}", color='light_cyan')
+
         # 啟動排程執行緒
         thread = threading.Thread(target=self._run_scheduler, daemon=True)
         thread.start()

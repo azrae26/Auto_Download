@@ -86,32 +86,68 @@ class CalendarChecker:
         rect = self.calendar.rectangle()  # 獲取日歷元素的矩形範圍
         today = datetime.now()  # 獲取今日日期
         
+        debug_print(f"當前時間: {today.strftime('%Y-%m-%d %H:%M:%S')}", color='yellow')
+        
         # 日期區域的高度（扣除標題區域）
         date_area_height = rect.bottom - rect.top - 52  # 扣除52px的標題區域
         
-        # 計算網格尺寸（確保只有6行）
+        # 計算網格尺寸
         cell_width = (rect.right - rect.left) / self.GRID_COLS  # 計算每個單元格的寬度
         cell_height = date_area_height / 6  # 日期區域平均分成6行
         
-        # 計算日期位置
-        first_day = today.replace(day=1)  # 計算當月第一天
-        first_day_col = (first_day.weekday() + 1) % 7  # 計算當月第一天是星期幾
-        days_from_start = today.day - days_ago - 1  # 計算從當月第一天到今天的天數
-        total_position = first_day_col + days_from_start  # 計算總位置
+        # 計算目標日期
+        target_date = today.replace(day=today.day - days_ago)
+        raw_weekday = target_date.weekday()  # 0-6 (週一-週日)
         
-        # 計算目標座標
-        target_row = total_position // 7  # 計算目標行（0-5）
-        target_col = total_position % 7  # 計算目標列（0-6）
+        # 轉換到日曆的列序（週日=1, 週一=2, ..., 週六=7）
+        if raw_weekday == 6:  # 週日
+            calendar_col = 1
+        else:
+            calendar_col = raw_weekday + 2
+            
+        debug_print(f"原始 weekday(): {raw_weekday}", color='yellow')
+        debug_print(f"日曆列序: {calendar_col}", color='yellow')
         
-        # 計算最終座標
-        x = rect.left + (target_col + 0.5) * cell_width  # x座標（列中心）
+        # 計算這個日期在月曆上的位置
+        first_day = target_date.replace(day=1)
+        raw_first_weekday = first_day.weekday()  # 0-6 (週一-週日)
+        
+        # 轉換月初日期到日曆的列序
+        if raw_first_weekday == 6:  # 週日
+            first_calendar_col = 1
+        else:
+            first_calendar_col = raw_first_weekday + 2
+            
+        debug_print(f"月初原始 weekday(): {raw_first_weekday}", color='yellow')
+        debug_print(f"月初日曆列序: {first_calendar_col}", color='yellow')
+        
+        # 計算從月初第一格開始的偏移天數
+        days_offset = target_date.day - 1  # 從1號到目標日期的天數
+        
+        # 修正總偏移計算邏輯：日曆總是會在第一行顯示完整的一週
+        # 無論月初是星期幾，都要加上該月1號之前的位置數
+        # 這些位置會被前一個月的日期填充
+        if raw_first_weekday == 6:  # 月初是週日
+            # 即使是週日，前面仍有6個位置被前月日期填充
+            total_offset = 6 + days_offset
+        else:
+            # raw_first_weekday + 1 表示前面有多少個前月日期
+            total_offset = (raw_first_weekday + 1) + days_offset
+        
+        # 計算在第幾行（從0開始）
+        target_row = total_offset // 7
+        
+        # 計算最終座標（使用日曆列序，需要減1因為從0開始計算）
+        x = rect.left + ((calendar_col - 1) + 0.5) * cell_width  # x座標（列中心）
         y = rect.top + 52 + (target_row + 0.5) * cell_height  # y座標（從標題區域下方開始）
         
-        debug_print(f"日曆區域: 左={rect.left}, 上={rect.top}, 右={rect.right}, 下={rect.bottom}", color='light_cyan')
-        debug_print(f"日歷尺寸: 寬={rect.right - rect.left}px, 高={rect.bottom - rect.top}px", color='light_cyan')
-        debug_print(f"日期區高度: {date_area_height}px, 寬度: {rect.right - rect.left}px", color='light_cyan')
-        debug_print(f"單元格尺寸: 寬={cell_width:.1f}px, 高={cell_height:.1f}px", color='light_cyan')
-        debug_print(f"目標位置: 第{target_row + 1}行, 第{target_col + 1}列", color='light_cyan')
+        debug_print(f"日期計算:", color='light_cyan')
+        debug_print(f"目標日期: {target_date.strftime('%Y-%m-%d')}", color='light_cyan')
+        debug_print(f"星期幾: {calendar_col} (1=週日, 2=週一, ..., 7=週六)", color='light_cyan')
+        debug_print(f"月初星期幾: {first_calendar_col}", color='light_cyan')
+        debug_print(f"日期偏移: {days_offset}", color='light_cyan')
+        debug_print(f"總偏移: {total_offset}", color='light_cyan')
+        debug_print(f"目標位置: 第{target_row + 1}行, 第{calendar_col}列", color='light_cyan')
         debug_print(f"點擊座標: x={int(x)}, y={int(y)}", color='light_cyan')
         
         return int(x), int(y)
@@ -133,7 +169,7 @@ class CalendarChecker:
                 click_at(x, y, clicks=3, interval=Config.DOUBLE_CLICK_INTERVAL, 
                         hwnd=self.hwnd, window_title=self.window_title)
                 
-                debug_print("已執行三次點擊", color='yellow')
+                debug_print("已執行三次點擊", color='light_yellow')
                 return True
                 
         except Exception as e:
@@ -151,7 +187,7 @@ class CalendarChecker:
             with program_moving_context():
                 click_at(x, y, clicks=2, interval=Config.DOUBLE_CLICK_INTERVAL, hwnd=self.hwnd, window_title=self.window_title)
                 
-                debug_print("已點擊日歷空白處", color='yellow')
+                debug_print("已點擊日歷空白處", color='light_yellow')
                 return True
                 
         except Exception as e:
@@ -204,7 +240,7 @@ def start_calendar_checker(days_ago=0, hwnd=None, window_title=None):
 def start_click_calendar_blank(hwnd=None, window_title=None):
     """開始點擊日歷空白處"""
     try:
-        debug_print("開始點擊日歷空白處...", color='yellow')
+        debug_print("開始點擊日歷空白處...", color='light_yellow')
 
         checker = CalendarChecker()
         if not checker.find_window():

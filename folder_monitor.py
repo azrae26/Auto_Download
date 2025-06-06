@@ -9,7 +9,7 @@ import re
 class FolderMonitor:
     def __init__(self, folder_path="C:\\temp"):
         self.folder_path = folder_path
-        self.target_path = "I:\\共用雲端硬碟\\商拓管理\\券商研究報告分享\\填報告"
+        self.target_path = "I:\\共用雲端硬碟\\商拓管理\\券商研究報告分享\\填報告\\test不用填"
         self.is_monitoring = False
         self.today_files = []
         self.last_file_count = 0
@@ -19,16 +19,22 @@ class FolderMonitor:
         }
         # 排除掃描的檔案
         self.exclude_files = ['sync.ffs_db']
-        # 包含以下關鍵字排除複製
-        self.exclude_copy_files = [
-            'sync.ffs_db',
-            '_公司', '晨訊', '週報', '策略', '產業', 'ETF', 'supply chain'
-        ]
-        
+        # 使用正則表達式來匹配要排除的檔案
+        self.exclude_pattern = re.compile(
+            r'sync\.ffs_db|_公司|晨訊|晨報|日報|週報|月報|週刊|月刊|'
+            r'策略|產業|專題|焦點|重要財報|營收檢討|ESG報告|'
+            r',jp(?!M)|\.JP(?!M)|-JP(?!M)|_JP(?!M)|'
+            r'KS|\.KS|-KS|_KS|'
+            r'Weekly|Monthly|I／O|ETF|TPCA|CTBC|Asia |APAC |Global|Greater|SEMICON|'
+            r'Telecoms|Financials|Alert|tracker|supply\s*chain',
+            re.IGNORECASE)
+        # 日誌輸出被排除的檔名
+        debug_print(f"排除條件: {self.exclude_pattern.pattern}", color='light_magenta')
+
     def log_total_files(self, total_count):
         """輸出今日檔案總數"""
         debug_print("", color='white')
-        debug_print("======== 檔案統計 ========", color='yellow')
+        debug_print("======== 檔案統計 ========", color='light_yellow')
         debug_print(f"     今日檔案總數: {total_count}", color='light_green')
     
     def log_date_statistics(self, date_counts):
@@ -39,7 +45,7 @@ class FolderMonitor:
             month, day = date.split('/')
             weekday = self.weekdays[datetime.strptime(f"2024{month}{day}", "%Y%m%d").strftime('%A')] # 取得星期幾
             debug_print(f"{month} / {day} （{weekday}）：{count} 個檔案", color='light_cyan')
-        debug_print("==========================", color='yellow')
+        debug_print("==========================", color='light_yellow')
     
     def log_new_file(self, filename):
         """輸出新發現的檔案"""
@@ -105,7 +111,7 @@ class FolderMonitor:
                     if file:  # 確保檔案名稱不是空的
                         debug_print(f"- {file}", color='white')
             
-            debug_print(f"總計收集到 {total_files} 個檔案", color='yellow')
+            debug_print(f"總計收集到 {total_files} 個檔案", color='light_yellow')
 
             # 分析今日新檔案的匹配情況
             if total_files > 0:
@@ -127,7 +133,7 @@ class FolderMonitor:
             new_files, _ = self.scan_files_for_date(today)
             
             if not new_files:
-                debug_print("今日沒有新檔案", color='yellow')
+                debug_print("今日沒有新檔案", color='light_yellow')
                 return {}
             
             # 定義各時間點的日期
@@ -172,7 +178,7 @@ class FolderMonitor:
                 matches = []
                 normalized_new_file = self._normalize_filename(new_file, has_extension=True)
                 # 輸出格式化前後的檔名以便除錯
-                debug_print(f"\n檔案: {new_file}", color='white')
+                debug_print(f"檔案: {new_file}", color='white')
                 debug_print(f"格式化後: {normalized_new_file}", color='white')
                 
                 # 比對每個時間點的列表
@@ -190,14 +196,14 @@ class FolderMonitor:
                 matching_results[new_file] = matches
             
             # 輸出匹配統計
-            debug_print("=== 新檔案配統計 ===", color='light_cyan')
-            debug_print(f"今日總共有 {len(new_files)} 個新檔案", color='yellow')
+            debug_print(f"=== {today.strftime('%Y-%m-%d')} 新檔案配統計 ===", color='light_cyan')
+            debug_print(f"今日總共有 {len(new_files)} 個新檔案", color='light_yellow')
             for date_name, count in match_stats.items():
                 date = date_mapping[date_name]
                 weekday = self.weekdays[date.strftime('%A')]
-                debug_print(f"{date_name} ({date.strftime('%m/%d')} {weekday}) 新檔案數: {count}", color='yellow')
+                debug_print(f"{date_name} ({date.strftime('%m/%d')} {weekday}) 新檔案數: {count}", color='light_yellow')
             
-            debug_print("=== 分析完成 ===", color='light_cyan')
+            debug_print("========== 分析完成 ==========", color='light_cyan')
             return matching_results
 
         except Exception as e:
@@ -265,39 +271,41 @@ class FolderMonitor:
     def start_monitoring(self):
         """開始監控"""
         self.is_monitoring = True
-        debug_print(f"\n開始監控資料夾: {self.folder_path}")
+        debug_print(f"開始監控資料夾: {self.folder_path}")
         self.scan_new_files()
         
     def stop_monitoring(self):
         """停止監控"""
         self.is_monitoring = False
-        debug_print("資料夾監控已停止")
+        debug_print("資料夾監控已停止", color='light_yellow')
     
     def copy_file_to_target(self, filename):
-        """複製單個檔案到目標資料夾"""
+        """複製單個檔案到目標資料夾，如果資料夾不存在則建立"""
         try:
+            # 檢查目標資料夾是否存在，不存在則建立
+            if not os.path.exists(self.target_path):
+                os.makedirs(self.target_path)
+                debug_print(f"已建立目標資料夾: {self.target_path}", color='light_green')
+            
             # 取得檔案路徑
             source = os.path.join(self.folder_path, filename)
             # 取得目標路徑
             target = os.path.join(self.target_path, filename)
             # 複製檔案
             shutil.copy2(source, target)
-            debug_print(f"已複製: {filename}", color='white')
         except Exception as e:
             debug_print(f"複製檔案失敗: {filename}, 錯誤: {str(e)}", color='light_red')
     
     def copy_today_files(self):
         """複製今日所有新檔案，但排除特定檔案"""
         today = datetime.now().date()
-        copied_count = 0  # 計數器
+        copied_files = []  # 成功複製的檔案
+        excluded_files = []  # 被排除的檔案
         
         try:
+            debug_print("開始複製檔案...", color='light_cyan')
             # 掃描檔案
             for file in os.listdir(self.folder_path):
-                # 檢查是否為排除的檔案
-                if any(exclude in file for exclude in self.exclude_copy_files):
-                    continue
-                
                 # 取得檔案路徑
                 file_path = os.path.join(self.folder_path, file)
                 if not os.path.isfile(file_path):
@@ -305,14 +313,31 @@ class FolderMonitor:
                 
                 # 檢查檔案日期
                 if datetime.fromtimestamp(os.path.getctime(file_path)).date() == today:
+                    # 使用正則表達式檢查是否為排除的檔案
+                    if self.exclude_pattern.search(file):
+                        # 找出匹配到的排除規則
+                        match = self.exclude_pattern.search(file)
+                        excluded_files.append((file, match.group()))  # 儲存檔案名和匹配規則
+                        continue
+                    
                     self.copy_file_to_target(file)  # 複製檔案
-                    copied_count += 1  # 計數加1
+                    copied_files.append(file)  # 儲存成功複製的檔案名
+            
+            # 輸出複製結果
+            debug_print(f"===== {today.strftime('%Y-%m-%d')} =====", color='light_cyan')
+            debug_print("===== 複製成功的檔案 =====", color='light_cyan')
+            for file in copied_files:
+                debug_print(f"已複製: {file}", color='white')
+            
+            debug_print("====== 被排除的檔案 ======", color='light_cyan')
+            for file, rule in excluded_files:
+                debug_print(f"排除檔案: {file} (匹配規則: {rule})", color='light_magenta')
             
             # 輸出複製統計
-            debug_print("")
-            debug_print("======== 複製統計 ========")
-            debug_print(f"     成功複製: {copied_count} 個檔案")
-            debug_print("==========================")
+            debug_print("======= 複製統計 =======", color='light_cyan')
+            debug_print(f"   成功複製: {len(copied_files)} 個檔案", color='light_yellow')
+            debug_print(f"   已排除: {len(excluded_files)} 個檔案", color='light_yellow')
+            debug_print("========================", color='light_cyan')
 
         except Exception as e:
             debug_print(f"複製檔案過程發生錯誤: {str(e)}", color='light_red')
@@ -320,11 +345,11 @@ class FolderMonitor:
 def start_folder_monitor(existing_monitor=None):
     """啟動或切換資料夾監控"""
     if existing_monitor and existing_monitor.is_monitoring:
-        debug_print("停止資料夾監控...", color='yellow')
+        debug_print("停止資料夾監控...", color='light_yellow')
         existing_monitor.stop_monitoring()
         return None
     else:
-        debug_print("啟動資料夾監控...", color='yellow')
+        debug_print("啟動資料夾監控...", color='light_yellow')
         monitor = FolderMonitor()
         monitor.start_monitoring()
         return monitor

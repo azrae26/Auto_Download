@@ -65,7 +65,7 @@ def find_window_handle(target_title=None):
     
     if not windows:
         debug_print("找不到任何符合的視窗", color='light_red')
-        debug_print("請確認 DostocksBiz 程式是否已啟動", color='yellow')
+        debug_print("請確認 DostocksBiz 程式是否已啟動", color='light_yellow')
     
     return windows 
 
@@ -248,7 +248,7 @@ def stop_refresh_check():
     """停止檢測列表刷新"""
     global refresh_checking
     refresh_checking = False
-    debug_print("停止檢測列表刷新", color='yellow')
+    debug_print("停止檢測列表刷新", color='light_yellow')
 
 def check_mouse_movement():
     """檢查滑鼠是否移動"""
@@ -387,8 +387,17 @@ def check_target_element(hwnd, x, y, expected_text=None):
         return False
 
 @check_mouse_before_move(retry_times=2)  # 使用裝飾器，設定重試次數為2
-def click_at(x, y, is_first_click=False, clicks=1, interval=Config.DOUBLE_CLICK_INTERVAL, sleep_interval=None, hwnd=None, window_title=None, expected_text=None):
-    """使用 win32api 進行點擊，並檢查元素文字"""
+def click_at(x, y, is_first_click=False, clicks=1, interval=Config.DOUBLE_CLICK_INTERVAL, sleep_interval=Config.SLEEP_INTERVAL, hwnd=None, window_title=None, expected_text=None):
+    """使用 win32api 進行點擊，並檢查元素文字
+    Args:
+        x, y: 目標座標
+        is_first_click: 是否是第一次點擊
+        clicks: 點擊次數，預設為 1
+        interval: 點擊間隔，預設為 DOUBLE_CLICK_INTERVAL
+        sleep_interval: 點擊後等待時間，預設為 SLEEP_INTERVAL
+        hwnd: 視窗句柄
+        window_title: 視窗標題
+        expected_text: 預期的元素文字，預設為 None"""
     global last_mouse_pos
     
     try:
@@ -432,8 +441,14 @@ def click_at(x, y, is_first_click=False, clicks=1, interval=Config.DOUBLE_CLICK_
                 if clicks > 1:
                     time.sleep(interval)
             
-            # 點擊後等待時間，第一次點擊等待時間
-            time.sleep(sleep_interval or (interval * (5 if is_first_click else 0.5)))
+            # 點擊後等待時間，第一次點擊等待時間較長
+            time.sleep(sleep_interval * (10 if is_first_click else 0.5))
+            
+            # 點擊後檢查是否有錯誤對話框
+            if check_error_dialog():
+                debug_print("點擊操作觸發了錯誤對話框", color='light_red')
+                return False
+            
             return True  # 只有所有操作都成功才返回 True
                 
     except Exception as e:
@@ -513,7 +528,7 @@ def scroll_to_file(file, list_area, hwnd):
                 list_type = 'industry'
                 
             if list_type:
-                debug_print(f"嘗試點擊 [{target_list}] 列表", color='yellow')
+                debug_print(f"嘗試點擊 [{target_list}] 列表", color='light_yellow')
                 # 點擊切換到目標檔案所在的列表
                 if not switch_to_list(hwnd, list_type, next_list=False):
                     debug_print("切換到目標列表失敗", color='light_red')
@@ -541,8 +556,8 @@ def scroll_to_file(file, list_area, hwnd):
             debug_print(f"需要從 [{current_list}] 切換到 [{target_list}]", color='blue', bold=True)
             # 根據目標檔案位置決定點擊位置
             press_position = 'top' if target_index < current_index else 'bottom'
-            debug_print(f"目標檔案在上方，點擊列表{press_position}", color='yellow') if press_position == 'top' else \
-            debug_print(f"目標檔案在下方，點擊列表{press_position}", color='yellow')
+            debug_print(f"目標檔案在上方，點擊列表{press_position}", color='light_yellow') if press_position == 'top' else \
+            debug_print(f"目標檔案在下方，點擊列表{press_position}", color='light_yellow')
             
             # 切換列表時傳入點擊位置參數
             if not switch_to_list(hwnd, press_list_top_or_bottom=press_position):
@@ -594,10 +609,10 @@ def scroll_to_file(file, list_area, hwnd):
                 
             # 決定滾動方向
             if target_index < current_index:
-                debug_print("目標檔案在上方，向上翻頁", color='yellow')
+                debug_print("目標檔案在上方，向上翻頁", color='light_yellow')
                 pyautogui.press('pageup')
             else:
-                debug_print("目標檔案在下方，向下翻頁", color='yellow')
+                debug_print("目標檔案在下方，向下翻頁", color='light_yellow')
                 pyautogui.press('pagedown')
                 
             time.sleep(0.2)
@@ -675,7 +690,7 @@ def switch_to_list(hwnd, list_type=None, next_list=True, press_list_top_or_botto
                 if len(lists) >= 2:
                     next_list = lists[1]  # 從左側列表切換到中間列表
                     rect = next_list.rectangle()
-                    debug_print("切換到下一個列表", color='yellow')
+                    debug_print("切換到下一個列表", color='light_yellow')
                 else:
                     debug_print("警告: 找不到足夠的列表區域", color='light_red')
                     return False
@@ -688,7 +703,7 @@ def switch_to_list(hwnd, list_type=None, next_list=True, press_list_top_or_botto
                 list_id, list_name = list_types[list_type]
                 target_list = main_window.child_window(auto_id=list_id)
                 rect = target_list.rectangle()
-                debug_print(f"切換到{list_name}列表", color='yellow')
+                debug_print(f"切換到{list_name}列表", color='light_yellow')
 
             # 計算列表中心點的 x 座標
             center_x = (rect.left + rect.right) // 2
@@ -736,3 +751,60 @@ def reset_mouse_position():
     """重置滑鼠位置記錄"""
     global last_mouse_pos
     last_mouse_pos = None
+
+def check_error_dialog():
+    """檢查並處理錯誤對話框"""
+    try:
+        # 尋找所有視窗
+        def enum_windows_callback(hwnd, windows):
+            if win32gui.IsWindowVisible(hwnd):
+                if win32gui.GetClassName(hwnd) == "#32770":
+                    windows.append(hwnd)
+            return True
+
+        windows = []
+        win32gui.EnumWindows(enum_windows_callback, windows)
+
+        # 如果找到對話框
+        for error_hwnd in windows:
+            if win32gui.IsWindowVisible(error_hwnd):
+                debug_print("檢測到錯誤對話框", color='light_red')
+                
+                # 獲取對話框位置
+                rect = win32gui.GetWindowRect(error_hwnd)
+                width = rect[2] - rect[0]
+                height = rect[3] - rect[1]
+                
+                # 計算確定按鈕的位置（中間下方110的位置）
+                click_x = rect[0] + (width // 2)  # 水平中心
+                click_y = rect[1] + 110  # 從頂部往下110像素
+                
+                time.sleep(0.5)
+                # 使用一般點擊左鍵
+                pyautogui.click(click_x, click_y)
+                time.sleep(0.1)
+
+                # 檢查對話框是否關閉
+                if not win32gui.IsWindow(error_hwnd):
+                    debug_print("錯誤對話框已關閉", color='light_green')
+                    return True
+                
+                debug_print("無法關閉錯誤對話框", color='light_red')
+                return True
+            
+        return False
+        
+    except Exception as e:
+        debug_print(f"處理錯誤對話框時發生錯誤: {str(e)}", color='light_red')
+        return False
+
+# 在檔案最後添加
+#if __name__ == "__main__":
+#    debug_print("開始測試錯誤對話框檢測...", color='light_cyan')
+#    try:
+#        while True:
+#            check_error_dialog()
+#            time.sleep(2)  # 每2秒檢查一次
+#    except KeyboardInterrupt:
+#        debug_print("\n結束測試", color='light_yellow')
+

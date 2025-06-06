@@ -22,6 +22,7 @@ from font_size_setter import set_font_size
 from chrome_monitor import start_chrome_monitor
 from folder_monitor import start_folder_monitor, FolderMonitor
 from config import Config, COLORS  # 添加這行
+from test_terminal import test_terminal_support
 
 class FileProcessor:
     """處理文件相關操作"""
@@ -37,7 +38,7 @@ class FileProcessor:
         if count <= 0:
             return
                 
-        time.sleep(Config.CLOSE_WINDOW_INTERVAL * 3)  # 等待時間確保視窗完全打開
+        time.sleep(Config.CLOSE_WINDOW_INTERVAL * 6)  # 等待時間確保視窗完全打開
         
         try:
             # 按下 CTRL
@@ -64,7 +65,7 @@ class FileProcessor:
         """處理檔案"""
         try:
             if should_stop_callback():
-                debug_print("[DEBUG] 下載開始前檢測到停止信號", color='yellow')
+                debug_print("[DEBUG] 下載開始前檢測到停止信號", color='light_yellow')
                 return
 
             if not ensure_foreground_window(hwnd, window_title):
@@ -134,7 +135,7 @@ class FileProcessor:
                             all_files.extend(valid_files)
                             debug_print(f"[{list_name}] 找到 {len(valid_files)} 個未下載檔案", color='white')
                         else:
-                            debug_print(f"[{list_name}] 沒有新的檔案需要下載", color='yellow')
+                            debug_print(f"[{list_name}] 沒有新的檔案需要下載", color='light_yellow')
                 
                 if not all_files:
                     debug_print("所有檔案已下載完成", color='light_green')
@@ -177,7 +178,8 @@ class FileProcessor:
                             center_x, 
                             center_y, 
                             clicks=2, 
-                            interval=Config.DOWNLOAD_INTERVAL, 
+                            interval=Config.DOUBLE_CLICK_INTERVAL,
+                            sleep_interval=Config.DOWNLOAD_INTERVAL,
                             is_first_click=is_first_click, 
                             hwnd=hwnd, 
                             window_title=window_title,
@@ -188,7 +190,6 @@ class FileProcessor:
                             # 如果這是第一次點擊，多等待一段時間
                             if is_first_click:
                                 is_first_click = False
-                                time.sleep(Config.SLEEP_INTERVAL * 5)
                             else:
                                 click_count += 1
                                 # 如果達到批次大小，關閉視窗
@@ -203,7 +204,7 @@ class FileProcessor:
 
                         if self.is_last_file_in_list(file, area_index, all_files):
                             if area_index == len(valid_areas) - 1:
-                                debug_print(f"已經是最後一個列表，跳過切換", color='yellow')
+                                debug_print(f"已經是最後一個列表，跳過切換", color='light_yellow')
                             else:
                                 debug_print(f"切換到下一個列表", color='light_cyan')
                                 switch_to_list(hwnd)
@@ -270,6 +271,7 @@ class MainApp:
         self.stop_event = threading.Event()
         self.esc_thread = None  # 新增：保存 ESC 監聽線程的引用
         self.chrome_monitor = None
+        self.hotkeys_enabled = False  # 改為 False，預設禁用
         self.collected_lists = {
             '今日': [], '昨日': [], '1週前': [], '2週前': [], '3週前': [], 
             '4週前': [], '5週前': [], '6週前': [], '7週前': [], '8週前': []
@@ -339,7 +341,7 @@ class MainApp:
             
             click_at(center_x, center_y, clicks=2, interval=Config.SLEEP_INTERVAL, 
                     hwnd=hwnd, window_title=window_title)
-            debug_print("已點擊每日報告標籤", color='yellow')
+            debug_print("已點擊每日報告標籤", color='light_yellow')
             return True
                 
         except Exception as e:
@@ -369,13 +371,13 @@ class MainApp:
         def press_left_or_up(left_times, up_times):
             """連續按左或上鍵指定次數"""
             if left_times > 0:
-                debug_print(f"按下左鍵 {left_times} 次", color='yellow')
+                debug_print(f"按下左鍵 {left_times} 次", color='light_yellow')
             for _ in range(left_times):
                 pyautogui.press('left')
                 time.sleep(Config.SLEEP_INTERVAL)
             
             if up_times > 0:
-                debug_print(f"按下上鍵 {up_times} 次", color='yellow')
+                debug_print(f"按下上鍵 {up_times} 次", color='light_yellow')
             for _ in range(up_times):
                 pyautogui.press('up')
                 time.sleep(Config.SLEEP_INTERVAL)
@@ -424,10 +426,10 @@ class MainApp:
         # 執行所有步驟
         for i, (step_name, step_func) in enumerate(steps, 1):
             if self.should_stop:
-                debug_print("任務已停止", color='yellow')
+                debug_print("任務已停止", color='light_yellow')
                 break
             
-            debug_print(f"步驟{i}: {step_name}", color='yellow')
+            debug_print(f"步驟{i}: {step_name}", color='light_yellow')
             step_func()
             time.sleep(1)
         
@@ -457,7 +459,7 @@ class MainApp:
                 daemon=True
             ).start()
         else:
-            debug_print("停止檢測列表刷新", color='yellow')
+            debug_print("停止檢測列表刷新", color='light_yellow')
             stop_refresh_check()
 
     def monitor_chrome(self):
@@ -597,25 +599,46 @@ class MainApp:
         
         # 執行步驟
         for step_name, step_func in steps:
-            debug_print(f"執行: {step_name}", color='yellow')
+            debug_print(f"執行: {step_name}", color='light_yellow')
             step_func()
         
+    def register_essential_hotkeys(self):
+        """註冊必要的快捷鍵（F12開關和關閉程式）"""
+        keyboard.add_hotkey('ctrl+shift+f12', self.toggle_hotkeys)
+        keyboard.add_hotkey('ctrl+shift+q', lambda: True)
+
+    def toggle_hotkeys(self):
+        """切換快捷鍵啟用狀態"""
+        keyboard.unhook_all()  # 先取消所有快捷鍵
+        
+        self.hotkeys_enabled = not self.hotkeys_enabled
+        if self.hotkeys_enabled:
+            self.register_hotkeys()  # 重新註冊所有快捷鍵
+            debug_print("已啟用所有快捷鍵", color='light_green')
+        else:
+            self.register_essential_hotkeys()  # 只註冊必要的快捷鍵
+
+    def register_hotkeys(self):
+        """註冊所有快捷鍵"""
+        keyboard.add_hotkey('ctrl+shift+e', self.execute_sequence)
+        keyboard.add_hotkey('ctrl+shift+f', self.download_current_list)
+        keyboard.add_hotkey('ctrl+shift+g', start_list_area_checker)
+        keyboard.add_hotkey('ctrl+shift+b', set_font_size)
+        keyboard.add_hotkey('ctrl+shift+t', self.toggle_refresh_check)
+        keyboard.add_hotkey('ctrl+shift+r', list_all_controls)
+        keyboard.add_hotkey('ctrl+shift+m', monitor_clicks)
+        keyboard.add_hotkey('ctrl+shift+k', self.monitor_chrome)
+        keyboard.add_hotkey('ctrl+shift+f8', test_terminal_support)
+        keyboard.add_hotkey('ctrl+shift+f9', self.collect_and_analyze_lists)
+        keyboard.add_hotkey('ctrl+shift+f10', self.list_all_reports)
+        keyboard.add_hotkey('ctrl+shift+f11', self.copy_today_files)
+        keyboard.add_hotkey('ctrl+shift+f12', self.toggle_hotkeys)  # 新增：切換快捷鍵的快捷鍵
+
     def run(self):
         try:
-            debug_print("=== 研究報告自動下載程式 ===", color='light_blue', bold=True)
+            debug_print("=== 研究報告自動下載程式 ===", color='light_yellow', bold=True)
             
-            # 註冊所有熱鍵
-            keyboard.add_hotkey('ctrl+shift+e', self.execute_sequence)
-            keyboard.add_hotkey('ctrl+shift+f', self.download_current_list)
-            keyboard.add_hotkey('ctrl+shift+g', start_list_area_checker)
-            keyboard.add_hotkey('ctrl+shift+b', set_font_size)
-            keyboard.add_hotkey('ctrl+shift+t', self.toggle_refresh_check)
-            keyboard.add_hotkey('ctrl+shift+r', list_all_controls)
-            keyboard.add_hotkey('ctrl+shift+m', monitor_clicks)
-            keyboard.add_hotkey('ctrl+shift+k', self.monitor_chrome)
-            keyboard.add_hotkey('ctrl+shift+f10', self.collect_and_analyze_lists)  # 新增這行
-            keyboard.add_hotkey('ctrl+shift+f11', self.list_all_reports)
-            keyboard.add_hotkey('ctrl+shift+f12', self.copy_today_files)
+            self.register_essential_hotkeys()  # 使用新方法註冊必要快捷鍵
             
             # 顯示熱鍵說明
             debug_print("=== 快捷鍵說明 ===", color='light_cyan')
@@ -627,16 +650,21 @@ class MainApp:
             debug_print("按下 CTRL + SHIFT + R    列出所有控件", color='light_green')
             debug_print("按下 CTRL + SHIFT + M    開始監控滑鼠點擊", color='light_green')
             debug_print("按下 CTRL + SHIFT + K    監控 Chrome 視窗", color='light_green')
-            debug_print("按下 CTRL + SHIFT + F11  列出所有報告清單", color='light_green')
-            debug_print("按下 CTRL + SHIFT + F12  複製今日所有新檔案", color='light_green')
-            debug_print("按下 CTRL + SHIFT + F10  收集並分析所有列表", color='light_green')
-            debug_print("按下 ESC                 停止下載", color='yellow')
+            debug_print("按下 CTRL + SHIFT + F8   測試終端機支援", color='light_green')
+            debug_print("按下 CTRL + SHIFT + F9   收集並分析所有列表", color='light_green')
+            debug_print("按下 CTRL + SHIFT + F10  列出所有報告清單", color='light_green')
+            debug_print("按下 CTRL + SHIFT + F11  複製今日所有新檔案", color='light_green')
+            debug_print("按下 CTRL + SHIFT + F12  切換快捷鍵啟用狀態", color='light_green')
+            debug_print("按下 ESC                 停止下載", color='light_yellow')
             debug_print("按下 CTRL+SHIFT+Q        關閉程式", color='light_red', bold=True)
             debug_print("==================", color='light_cyan')
 
             self.scheduler = Scheduler(self.execute_sequence)
             scheduler_thread = self.scheduler.init_scheduler() # 初始化排程器
             schedule_times = Config.get_schedule_times() # 獲取排程時間
+            debug_print("==================", color='light_cyan')
+
+            debug_print("已禁用所有快捷鍵（按下 CTRL + SHIFT + F12 切換）", color='light_yellow')
             
             # 使用阻塞方式等待 Ctrl+Shift+Q
             try:
@@ -660,4 +688,4 @@ def main():
         pass
 
 if __name__ == "__main__":
-    main()
+    main()  # 再執行主程式
