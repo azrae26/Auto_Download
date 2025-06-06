@@ -143,76 +143,100 @@ class FileProcessor:
 
                 debug_print(f"本輪需要下載 {len(all_files)} 個檔案", color='light_green')
 
-                # 下載檔案
-                for file, area_index in all_files:
-                    if should_stop_callback(): 
-                        return
+                # 啟用批次操作模式以提升效能
+                from utils import enable_batch_mode, disable_batch_mode, cache_file_position, get_cached_file_position
+                enable_batch_mode()
+                
+                try:
+                    # 下載檔案
+                    for i, (file, area_index) in enumerate(all_files):
+                        if should_stop_callback(): 
+                            return
 
-                    try:
-                        file_name = file.window_text()
-                        list_area = valid_areas[area_index]
-                        
-                        # 如果需要切換到不同的列表
-                        if area_index != current_list_index:
-                            debug_print(f"切換列表: 從 {current_list_index} 到 {area_index}", color='light_cyan')
-                            for _ in range(area_index - current_list_index):
-                                switch_to_list(hwnd)
-                            current_list_index = area_index
-                            time.sleep(Config.SLEEP_INTERVAL * 2)  # 等待列表切換完成
-                        
-                        # 檢查檔案可見性
-                        if not is_file_visible(file, list_area):
-                            debug_print(f"檔案 '{file_name}' 不在可視範圍內，嘗試調整位置", color='light_magenta')
-                            if not scroll_to_file(file, list_area, hwnd):
-                                debug_print(f"無法使檔案 '{file_name}' 進入可視範圍，跳過")
-                                continue
-                        
-                        # 執行點擊並檢查結果
-                        rect = file.rectangle()
-                        center_x, center_y = calculate_center_position(rect)
-                        if center_x is None or center_y is None:
-                            debug_print("無法計算檔案位置，跳過此檔案")
-                            continue
-                        
-                        if click_at(
-                            center_x, 
-                            center_y, 
-                            clicks=2, 
-                            interval=Config.DOUBLE_CLICK_INTERVAL,
-                            sleep_interval=Config.DOWNLOAD_INTERVAL,
-                            is_first_click=is_first_click, 
-                            hwnd=hwnd, 
-                            window_title=window_title,
-                            expected_text=file_name
-                        ):  # 只有在點擊成功時才執行後續操作
-                            debug_print(f"下載完成: {file_name}", color='white')
+                        try:
+                            file_name = file.window_text()
+                            list_area = valid_areas[area_index]
                             
-                            # 如果這是第一次點擊，多等待一段時間
-                            if is_first_click:
-                                is_first_click = False
+                            # 如果需要切換到不同的列表
+                            if area_index != current_list_index:
+                                debug_print(f"切換列表: 從 {current_list_index} 到 {area_index}", color='light_cyan')
+                                for _ in range(area_index - current_list_index):
+                                    switch_to_list(hwnd)
+                                current_list_index = area_index
+                                time.sleep(Config.SLEEP_INTERVAL * 2)  # 等待列表切換完成
+                            
+                            # 首先嘗試從缓存獲取檔案位置
+                            cached_x, cached_y = get_cached_file_position(file_name)
+                            
+                            if cached_x is not None and cached_y is not None:
+                                # 使用缓存的位置
+                                center_x, center_y = cached_x, cached_y
+                                debug_print(f"使用缓存位置: {file_name}", color='light_green')
                             else:
-                                click_count += 1
-                                # 如果達到批次大小，關閉視窗
-                                if click_count >= Config.CLICK_BATCH_SIZE:
-                                    self.close_windows(Config.CLICK_BATCH_SIZE)
-                                    click_count = 0
+                                # 檢查檔案可見性
+                                if not is_file_visible(file, list_area):
+                                    debug_print(f"檔案 '{file_name}' 不在可視範圍內，嘗試調整位置", color='light_magenta')
+                                    if not scroll_to_file(file, list_area, hwnd):
+                                        debug_print(f"無法使檔案 '{file_name}' 進入可視範圍，跳過")
+                                        continue
+                                
+                                # 計算檔案位置並缓存
+                                rect = file.rectangle()
+                                center_x, center_y = calculate_center_position(rect)
+                                if center_x is None or center_y is None:
+                                    debug_print("無法計算檔案位置，跳過此檔案")
+                                    continue
+                                
+                                # 缓存檔案位置
+                                cache_file_position(file_name, rect, f"listBox{['Morning', 'Research', 'Industry'][area_index]}Reports")
+                            
+                            # 批次模式下，每10個檔案才做一次完整的錯誤檢查
+                            skip_error_check = (i % 10 != 0)
+                            
+                            if click_at(
+                                center_x, 
+                                center_y, 
+                                clicks=2, 
+                                interval=Config.DOUBLE_CLICK_INTERVAL,
+                                sleep_interval=Config.DOWNLOAD_INTERVAL,
+                                is_first_click=is_first_click, 
+                                hwnd=hwnd, 
+                                window_title=window_title,
+                                expected_text=file_name,
+                                skip_error_check=skip_error_check
+                            ):  # 只有在點擊成功時才執行後續操作
+                                debug_print(f"下載完成: {file_name}", color='white')
+                                
+                                # 如果這是第一次點擊，多等待一段時間
+                                if is_first_click:
+                                    is_first_click = False
+                                else:
+                                    click_count += 1
+                                    # 如果達到批次大小，關閉視窗
+                                    if click_count >= Config.CLICK_BATCH_SIZE:
+                                        self.close_windows(Config.CLICK_BATCH_SIZE)
+                                        click_count = 0
 
-                            downloaded_files.add(file_name)  # 只有在點擊成功時才加入下載清單
-                        else:
-                            debug_print(f"下載失敗: {file_name}", color='light_red')
-                            continue  # 如果點擊失敗，跳過後續操作
-
-                        if self.is_last_file_in_list(file, area_index, all_files):
-                            if area_index == len(valid_areas) - 1:
-                                debug_print(f"已經是最後一個列表，跳過切換", color='light_yellow')
+                                downloaded_files.add(file_name)  # 只有在點擊成功時才加入下載清單
                             else:
-                                debug_print(f"切換到下一個列表", color='light_cyan')
-                                switch_to_list(hwnd)
-                                current_list_index += 1  # 更新當前列表索引
+                                debug_print(f"下載失敗: {file_name}", color='light_red')
+                                continue  # 如果點擊失敗，跳過後續操作
 
-                    except Exception as e:
-                        debug_print(f"處理檔案時發生錯誤: {str(e)}", color='light_red')
-                        continue
+                            if self.is_last_file_in_list(file, area_index, all_files):
+                                if area_index == len(valid_areas) - 1:
+                                    debug_print(f"已經是最後一個列表，跳過切換", color='light_yellow')
+                                else:
+                                    debug_print(f"切換到下一個列表", color='light_cyan')
+                                    switch_to_list(hwnd)
+                                    current_list_index += 1  # 更新當前列表索引
+
+                        except Exception as e:
+                            debug_print(f"處理檔案時發生錯誤: {str(e)}", color='light_red')
+                            continue
+                            
+                finally:
+                    # 確保批次模式被停用
+                    disable_batch_mode()
 
                 # 關閉剩餘的Chrome視窗
                 if click_count > 0:

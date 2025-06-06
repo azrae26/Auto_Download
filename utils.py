@@ -18,6 +18,11 @@ refresh_checking = False  # 用於控制刷新檢測的開關
 last_mouse_pos = None # 用於儲存滑鼠最後位置
 is_program_moving = False # 用於控制程式是否移動
 
+# 添加檔案位置缓存
+file_position_cache = {}  # 缓存檔案位置信息
+last_list_state = {}      # 缓存列表狀態
+batch_operation_mode = False  # 批次操作模式
+
 @contextmanager
 def program_moving_context():
     """控制程式移動滑鼠的上下文管理器"""
@@ -387,7 +392,7 @@ def check_target_element(hwnd, x, y, expected_text=None):
         return False
 
 @check_mouse_before_move(retry_times=2)  # 使用裝飾器，設定重試次數為2
-def click_at(x, y, is_first_click=False, clicks=1, interval=Config.DOUBLE_CLICK_INTERVAL, sleep_interval=Config.SLEEP_INTERVAL, hwnd=None, window_title=None, expected_text=None):
+def click_at(x, y, is_first_click=False, clicks=1, interval=Config.DOUBLE_CLICK_INTERVAL, sleep_interval=Config.SLEEP_INTERVAL, hwnd=None, window_title=None, expected_text=None, skip_error_check=False):
     """使用 win32api 進行點擊，並檢查元素文字
     Args:
         x, y: 目標座標
@@ -397,18 +402,21 @@ def click_at(x, y, is_first_click=False, clicks=1, interval=Config.DOUBLE_CLICK_
         sleep_interval: 點擊後等待時間，預設為 SLEEP_INTERVAL
         hwnd: 視窗句柄
         window_title: 視窗標題
-        expected_text: 預期的元素文字，預設為 None"""
-    global last_mouse_pos
+        expected_text: 預期的元素文字，預設為 None
+        skip_error_check: 是否跳過錯誤對話框檢查（批次模式下可跳過）"""
+    global last_mouse_pos, batch_operation_mode
     
     try:
-        # 確保視窗在前景
-        if not ensure_foreground_window(hwnd, window_title):
-            debug_print("視窗不在前景，重新嘗試點擊", color='light_red')
-            return False
+        # 批次模式下減少視窗前景檢查頻率
+        if not batch_operation_mode or is_first_click:
+            if not ensure_foreground_window(hwnd, window_title):
+                debug_print("視窗不在前景，重新嘗試點擊", color='light_red')
+                return False
         
         with program_moving_context():
-            # 使用 pyautogui 平滑移動滑鼠
-            pyautogui.moveTo(x, y, duration=0.1)  # 使用 duration 參數實現平滑移動
+            # 批次模式下減少滑鼠移動動畫時間
+            move_duration = 0.05 if batch_operation_mode else 0.1
+            pyautogui.moveTo(x, y, duration=move_duration)
             
             # 更新位置
             current_pos = pyautogui.position()
@@ -424,17 +432,19 @@ def click_at(x, y, is_first_click=False, clicks=1, interval=Config.DOUBLE_CLICK_
                                    normalized_x, normalized_y, 0, 0)
                 win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
                 
-                # 在按下和彈起之間檢查目標元素
-                if expected_text and not check_target_element(hwnd, x, y, expected_text):
+                # 批次模式下減少目標元素檢查頻率（每5個檔案檢查一次）
+                should_check_element = not batch_operation_mode or (expected_text and hash(expected_text) % 5 == 0)
+                if should_check_element and expected_text and not check_target_element(hwnd, x, y, expected_text):
                     debug_print(f"重新嘗試點擊", color='light_red')
                     win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                    return False  # 如果檢查失敗，直接返回 False
+                    return False
                 
-                # 確保視窗在前景
-                if not ensure_foreground_window(hwnd, window_title):
-                    debug_print("視窗不在前景，重新嘗試點擊", color='light_red')
-                    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                    return False  # 如果視窗不在前景，直接返回 False
+                # 批次模式下減少視窗前景檢查
+                if not batch_operation_mode:
+                    if not ensure_foreground_window(hwnd, window_title):
+                        debug_print("視窗不在前景，重新嘗試點擊", color='light_red')
+                        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                        return False
                 
                 win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
                 
@@ -444,8 +454,9 @@ def click_at(x, y, is_first_click=False, clicks=1, interval=Config.DOUBLE_CLICK_
             # 點擊後等待時間，第一次點擊等待時間較長
             time.sleep(sleep_interval * (10 if is_first_click else 0.5))
             
-            # 點擊後檢查是否有錯誤對話框
-            if check_error_dialog():
+            # 批次模式下減少錯誤對話框檢查頻率（每10個檔案檢查一次）
+            should_check_error = not skip_error_check and (not batch_operation_mode or hash(str(x) + str(y)) % 10 == 0)
+            if should_check_error and check_error_dialog():
                 debug_print("點擊操作觸發了錯誤對話框", color='light_red')
                 return False
             
@@ -751,6 +762,44 @@ def reset_mouse_position():
     """重置滑鼠位置記錄"""
     global last_mouse_pos
     last_mouse_pos = None
+
+def enable_batch_mode():
+    """啟用批次操作模式，減少檢查頻率"""
+    global batch_operation_mode
+    batch_operation_mode = True
+    debug_print("已啟用批次操作模式，將減少檢查頻率以提升效能", color='light_cyan')
+
+def disable_batch_mode():
+    """停用批次操作模式"""
+    global batch_operation_mode
+    batch_operation_mode = False
+    debug_print("已停用批次操作模式", color='light_cyan')
+
+def cache_file_position(file_name, rect, list_area_id):
+    """缓存檔案位置信息"""
+    global file_position_cache
+    file_position_cache[file_name] = {
+        'rect': rect,
+        'center_x': (rect.left + rect.right) // 2,
+        'center_y': (rect.top + rect.bottom) // 2,
+        'list_area_id': list_area_id,
+        'timestamp': time.time()
+    }
+
+def get_cached_file_position(file_name):
+    """獲取缓存的檔案位置，如果超過5秒則認為過期"""
+    global file_position_cache
+    if file_name in file_position_cache:
+        cache_data = file_position_cache[file_name]
+        if time.time() - cache_data['timestamp'] < 5:  # 5秒內有效
+            return cache_data['center_x'], cache_data['center_y']
+    return None, None
+
+def clear_position_cache():
+    """清除位置缓存"""
+    global file_position_cache
+    file_position_cache.clear()
+    debug_print("已清除檔案位置缓存", color='light_yellow')
 
 def check_error_dialog():
     """檢查並處理錯誤對話框"""
