@@ -1,0 +1,10 @@
+{
+    "python.defaultInterpreterPath": "C:\\Python312\\python.exe",
+    "python.pythonPath": "C:\\Python312\\python.exe",
+    "pylance.typeCheckingMode": "basic",
+    "python.analysis.autoImportCompletions": true,
+    "python.analysis.autoSearchPaths": true,
+    "python.analysis.extraPaths": [
+        "C:\\Python312\\Lib\\site-packages"
+    ]
+} 
