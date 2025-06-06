@@ -17,7 +17,7 @@ class Config:
     def get_schedule_times():
         """返回排程時間列表"""
         return [
-            {'type': 'daily', 'time': '09:50'},  # 每日固定時間
+            {'type': 'daily', 'time': '09:45'},  # 每日固定時間
             {'type': 'once', 'date': '2024-11-15', 'time': '10:50'}  # 單次執行時間
         ] 
     

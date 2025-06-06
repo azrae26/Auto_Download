@@ -1,3 +1,16 @@
+"""
+檔案監控模組
+功能: 監控指定資料夾的新檔案，並自動複製到目標位置
+職責: 
+- 掃描新檔案並提供即時通知
+- 根據排除規則過濾不需要的檔案
+- 複製檔案到兩個目標位置：
+  1. 固定位置：test不用填
+  2. 動態位置：每日研究報告任務/{YYYYMMDD}
+- 提供詳細的複製統計和日誌
+依賴: config.py, utils.py
+"""
+
 import os
 from datetime import datetime, timedelta
 import time
@@ -10,6 +23,7 @@ class FolderMonitor:
     def __init__(self, folder_path="C:\\temp"):
         self.folder_path = folder_path
         self.target_path = "I:\\共用雲端硬碟\\商拓管理\\券商研究報告分享\\填報告\\test不用填"
+        self.daily_report_base_path = "I:\\共用雲端硬碟\\商拓管理\\券商研究報告分享\\每日研究報告任務"
         self.is_monitoring = False
         self.today_files = []
         self.last_file_count = 0
@@ -279,8 +293,38 @@ class FolderMonitor:
         self.is_monitoring = False
         debug_print("資料夾監控已停止", color='light_yellow')
     
+    def get_daily_target_path(self):
+        """取得基於當前日期的目標路徑"""
+        today = datetime.now()
+        date_folder = today.strftime("%Y%m%d")
+        return os.path.join(self.daily_report_base_path, date_folder)
+    
+    def copy_file_to_targets(self, filename):
+        """複製單個檔案到兩個目標資料夾，如果資料夾不存在則建立"""
+        source = os.path.join(self.folder_path, filename)
+        targets = [self.target_path, self.get_daily_target_path()]
+        copy_results = []
+        
+        for target_dir in targets:
+            try:
+                # 檢查目標資料夾是否存在，不存在則建立
+                if not os.path.exists(target_dir):
+                    os.makedirs(target_dir)
+                    debug_print(f"已建立目標資料夾: {target_dir}", color='light_green')
+                
+                # 取得目標檔案路徑
+                target_file = os.path.join(target_dir, filename)
+                # 複製檔案
+                shutil.copy2(source, target_file)
+                copy_results.append(True)
+            except Exception as e:
+                debug_print(f"複製檔案到 {target_dir} 失敗: {filename}, 錯誤: {str(e)}", color='light_red')
+                copy_results.append(False)
+        
+        return copy_results
+    
     def copy_file_to_target(self, filename):
-        """複製單個檔案到目標資料夾，如果資料夾不存在則建立"""
+        """複製單個檔案到目標資料夾，如果資料夾不存在則建立（保留向後相容性）"""
         try:
             # 檢查目標資料夾是否存在，不存在則建立
             if not os.path.exists(self.target_path):
@@ -297,13 +341,18 @@ class FolderMonitor:
             debug_print(f"複製檔案失敗: {filename}, 錯誤: {str(e)}", color='light_red')
     
     def copy_today_files(self):
-        """複製今日所有新檔案，但排除特定檔案"""
+        """複製今日所有新檔案，但排除特定檔案，複製到兩個目標位置"""
         today = datetime.now().date()
         copied_files = []  # 成功複製的檔案
         excluded_files = []  # 被排除的檔案
+        copy_stats = {'test不用填': 0, '每日研究報告任務': 0}  # 複製統計
         
         try:
             debug_print("開始複製檔案...", color='light_cyan')
+            daily_target = self.get_daily_target_path()
+            debug_print(f"目標位置1: {self.target_path}", color='light_blue')
+            debug_print(f"目標位置2: {daily_target}", color='light_blue')
+            
             # 掃描檔案
             for file in os.listdir(self.folder_path):
                 # 取得檔案路徑
@@ -320,8 +369,15 @@ class FolderMonitor:
                         excluded_files.append((file, match.group()))  # 儲存檔案名和匹配規則
                         continue
                     
-                    self.copy_file_to_target(file)  # 複製檔案
-                    copied_files.append(file)  # 儲存成功複製的檔案名
+                    # 複製檔案到兩個目標位置
+                    copy_results = self.copy_file_to_targets(file)
+                    copied_files.append(file)  # 儲存檔案名
+                    
+                    # 統計成功複製到各目標的數量
+                    if copy_results[0]:  # test不用填
+                        copy_stats['test不用填'] += 1
+                    if copy_results[1]:  # 每日研究報告任務
+                        copy_stats['每日研究報告任務'] += 1
             
             # 輸出複製結果
             debug_print(f"===== {today.strftime('%Y-%m-%d')} =====", color='light_cyan')
@@ -335,8 +391,10 @@ class FolderMonitor:
             
             # 輸出複製統計
             debug_print("======= 複製統計 =======", color='light_cyan')
-            debug_print(f"   成功複製: {len(copied_files)} 個檔案", color='light_yellow')
-            debug_print(f"   已排除: {len(excluded_files)} 個檔案", color='light_yellow')
+            debug_print(f"   處理檔案: {len(copied_files)} 個", color='light_yellow')
+            debug_print(f"   排除檔案: {len(excluded_files)} 個", color='light_yellow')
+            debug_print(f"   test不用填: {copy_stats['test不用填']} 個檔案", color='light_yellow')
+            debug_print(f"   每日研究報告任務: {copy_stats['每日研究報告任務']} 個檔案", color='light_yellow')
             debug_print("========================", color='light_cyan')
 
         except Exception as e:
