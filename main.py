@@ -56,7 +56,7 @@ class FileProcessor:
         win32gui.EnumWindows(callback, titles)
         return titles
 
-    def close_windows(self, count):
+    def close_windows(self, count, initial_window_titles=None):
         """關閉指定數量的chrome分頁"""
         if count <= 0:
             return 0
@@ -71,8 +71,8 @@ class FileProcessor:
                 
                 for i in range(count):
                     # 記錄關閉前的所有Chrome視窗標題
-                    initial_titles = set(self.get_chrome_window_titles())
-                    if not initial_titles:
+                    before_close_titles = set(self.get_chrome_window_titles())
+                    if not before_close_titles:
                         break
                     
                     # 只需要按 W
@@ -81,15 +81,14 @@ class FileProcessor:
                     keyboard.release('w')
                     
                     # 等待Chrome反應，然後檢查標題變化
-                    
                     start_time = time.time()
                     title_changed = False
                     while time.time() - start_time < 3.0:  # 等待最多3秒
                         current_titles = set(self.get_chrome_window_titles())
-                        if current_titles != initial_titles:
+                        if current_titles != before_close_titles:
                             # 找出變化的標題
-                            removed_titles = initial_titles - current_titles
-                            added_titles = current_titles - initial_titles
+                            removed_titles = before_close_titles - current_titles
+                            added_titles = current_titles - before_close_titles
                             
                             if removed_titles:
                                 debug_print(f"消失的標題: {list(removed_titles)}", color='light_red')
@@ -104,6 +103,38 @@ class FileProcessor:
                     if not title_changed:
                         # 3秒後視窗標題沒變，視為關閉成功
                         successfully_closed += 1
+                
+                # 檢查是否回到初始狀態，如果沒有則繼續關閉（最多額外關2個）
+                if initial_window_titles is not None:
+                    extra_close_count = 0
+                    max_extra_close = 2
+                    
+                    while extra_close_count < max_extra_close:
+                        current_titles = set(self.get_chrome_window_titles())
+                        # 檢查是否有新增的視窗（相比初始狀態）
+                        new_windows = current_titles - initial_window_titles
+                        
+                        if not new_windows:
+                            debug_print("已回到初始Chrome視窗狀態，關閉完成", color='light_green')
+                            break
+                        
+                        debug_print(f"仍有 {len(new_windows)} 個新視窗未關閉，額外關閉第 {extra_close_count + 1} 個", color='light_yellow')
+                        debug_print(f"新視窗: {list(new_windows)}", color='light_cyan')
+                        
+                        # 額外關閉一個分頁
+                        keyboard.press('w')
+                        time.sleep(Config.CLOSE_WINDOW_INTERVAL / 3)
+                        keyboard.release('w')
+                        time.sleep(Config.CLOSE_WINDOW_INTERVAL)
+                        
+                        extra_close_count += 1
+                        successfully_closed += 1
+                    
+                    if extra_close_count >= max_extra_close:
+                        remaining_new = set(self.get_chrome_window_titles()) - initial_window_titles
+                        debug_print(f"已額外關閉 {max_extra_close} 個分頁，停止關閉", color='light_yellow')
+                        if remaining_new:
+                            debug_print(f"仍有 {len(remaining_new)} 個新視窗未關閉", color='light_red')
                 
                 # 最後才釋放 Ctrl
                 keyboard.release('ctrl')
@@ -161,6 +192,10 @@ class FileProcessor:
             is_first_click = True
             click_count = 0
             current_list_index = 0
+            
+            # 記住初始Chrome視窗標題集合（用於關閉分頁驗證）
+            initial_window_titles = set(self.get_chrome_window_titles())
+            debug_print(f"記住初始Chrome視窗 {len(initial_window_titles)} 個: {list(initial_window_titles)}", color='light_cyan')
             
             while True:
                 # 重置列表位置到第一個列表（如果不是第一次循環）
@@ -243,15 +278,15 @@ class FileProcessor:
                         ):  # 只有在點擊成功時才執行後續操作
                             debug_print(f"下載完成: {file_name}", color='white')
                             
-                            # 如果這是第一次點擊，多等待一段時間
+                            # 每次成功點擊都計入
                             if is_first_click:
                                 is_first_click = False
-                            else:
-                                click_count += 1
-                                # 如果達到批次大小，關閉視窗
-                                if click_count >= Config.CLICK_BATCH_SIZE:
-                                    self.close_windows(Config.CLICK_BATCH_SIZE)
-                                    click_count = 0
+                            
+                            click_count += 1
+                            # 如果達到批次大小，關閉視窗
+                            if click_count >= Config.CLICK_BATCH_SIZE:
+                                self.close_windows(Config.CLICK_BATCH_SIZE, initial_window_titles)
+                                click_count = 0
 
                             downloaded_files.add(file_name)  # 只有在點擊成功時才加入下載清單
                         else:
@@ -272,7 +307,7 @@ class FileProcessor:
 
                 # 關閉剩餘的Chrome視窗
                 if click_count > 0:
-                    self.close_windows(click_count)
+                    self.close_windows(click_count, initial_window_titles)
 
                 # 檢查是否有漏掉的檔案
                 debug_print("檢查是否有漏掉的檔案...", color='light_cyan')

@@ -768,6 +768,14 @@ def check_error_dialog():
         # 如果找到對話框
         for error_hwnd in windows:
             if win32gui.IsWindowVisible(error_hwnd):
+                # 獲取視窗標題
+                window_title = win32gui.GetWindowText(error_hwnd)
+                
+                # 排除 FreeFileSync 錯誤對話框
+                if "FreeFileSync" in window_title and "錯誤" in window_title:
+                    debug_print(f"忽略 FreeFileSync 錯誤對話框: {window_title}", color='light_yellow')
+                    continue
+                
                 debug_print("檢測到錯誤對話框", color='light_red')
                 
                 # 獲取對話框位置
