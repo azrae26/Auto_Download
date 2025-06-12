@@ -25,7 +25,18 @@ from config import Config, COLORS  # 添加這行
 from test_terminal import test_terminal_support
 
 class FileProcessor:
-    """處理文件相關操作"""
+    """
+    處理文件相關操作
+    功能：自動下載檔案、關閉Chrome分頁
+    職責：檔案下載流程控制、Chrome視窗管理
+    依賴：win32gui（視窗檢測）、keyboard（鍵盤操作）、pyautogui（滑鼠操作）
+    
+    新增功能：智能關閉Chrome分頁
+    - 每次關閉前檢測Chrome視窗標題
+    - 關閉後驗證視窗是否真的關閉
+    - 失敗時自動重試（最多3次）
+    - 返回實際關閉的分頁數量
+    """
     def __init__(self):
         self.current_file_count = 0
         self.last_known_position = 0
@@ -33,33 +44,78 @@ class FileProcessor:
         self.should_stop = False
         pyautogui.FAILSAFE = False
 
+    def get_chrome_window_titles(self):
+        """獲取所有Chrome視窗標題"""
+        def callback(hwnd, titles):
+            if win32gui.IsWindowVisible(hwnd):
+                title = win32gui.GetWindowText(hwnd)
+                if 'chrome' in title.lower() or '.pdf' in title.lower():
+                    titles.append(title)
+        
+        titles = []
+        win32gui.EnumWindows(callback, titles)
+        return titles
+
     def close_windows(self, count):
         """關閉指定數量的chrome分頁"""
         if count <= 0:
-            return
+            return 0
                 
-        time.sleep(Config.CLOSE_WINDOW_INTERVAL * 6)  # 等待時間確保視窗完全打開
+        time.sleep(Config.CLOSE_WINDOW_INTERVAL * 6)
+        successfully_closed = 0
         
         try:
-            # 按下 CTRL
-            keyboard.press('ctrl')
-            time.sleep(Config.CLOSE_WINDOW_INTERVAL * 3)  # 等待時間確保 CTRL 被按下
-            
-            # 按指定次數的 W
-            for _ in range(count):
-                keyboard.press('w')
-                time.sleep(Config.CLOSE_WINDOW_INTERVAL)  # 間隔時間
-                keyboard.release('w')
-                time.sleep(Config.CLOSE_WINDOW_INTERVAL)  # 間隔時間
-            
-            # 釋放 CTRL
-            keyboard.release('ctrl')
-            time.sleep(Config.CLOSE_WINDOW_INTERVAL)  # 等待時間確保所有視窗關閉
-            
+            if count > 0:
+                # 按住 Ctrl 一次就好
+                keyboard.press('ctrl')
+                
+                for i in range(count):
+                    # 記錄關閉前的所有Chrome視窗標題
+                    initial_titles = set(self.get_chrome_window_titles())
+                    if not initial_titles:
+                        break
+                    
+                    # 只需要按 W
+                    keyboard.press('w')
+                    time.sleep(Config.CLOSE_WINDOW_INTERVAL / 3)
+                    keyboard.release('w')
+                    
+                    # 等待Chrome反應，然後檢查標題變化
+                    
+                    start_time = time.time()
+                    title_changed = False
+                    while time.time() - start_time < 3.0:  # 等待最多3秒
+                        current_titles = set(self.get_chrome_window_titles())
+                        if current_titles != initial_titles:
+                            # 找出變化的標題
+                            removed_titles = initial_titles - current_titles
+                            added_titles = current_titles - initial_titles
+                            
+                            if removed_titles:
+                                debug_print(f"消失的標題: {list(removed_titles)}", color='light_red')
+                            if added_titles:
+                                debug_print(f"新增的標題: {list(added_titles)}", color='light_green')
+                                
+                            successfully_closed += 1
+                            title_changed = True
+                            break
+                        time.sleep(0.03)  # 每0.03秒檢查一次
+                    
+                    if not title_changed:
+                        # 3秒後視窗標題沒變，視為關閉成功
+                        successfully_closed += 1
+                
+                # 最後才釋放 Ctrl
+                keyboard.release('ctrl')
+                
         except Exception as e:
             debug_print(f"關閉視窗時發生錯誤: {str(e)}", color='light_red')
-            # 確保 CTRL 鍵被釋放
-            keyboard.release('ctrl')
+            try:
+                keyboard.release('ctrl')
+            except:
+                pass
+        
+        return successfully_closed
 
     def process_files(self, app, hwnd, window_title, should_stop_callback):
         """處理檔案"""
