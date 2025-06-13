@@ -10,6 +10,9 @@ class FolderMonitor:
     def __init__(self, folder_path="C:\\temp"):
         self.folder_path = folder_path
         self.target_path = "I:\\共用雲端硬碟\\商拓管理\\券商研究報告分享\\填報告\\test不用填"
+        # 新增第二個目標路徑，根據當天日期動態生成
+        today_str = datetime.now().strftime("%Y%m%d")
+        self.target_path_2 = f"I:\\共用雲端硬碟\\商拓管理\\券商研究報告分享\\每日研究報告任務\\{today_str}"
         self.is_monitoring = False
         self.today_files = []
         self.last_file_count = 0
@@ -30,6 +33,8 @@ class FolderMonitor:
             re.IGNORECASE)
         # 日誌輸出被排除的檔名
         debug_print(f"排除條件: {self.exclude_pattern.pattern}", color='light_magenta')
+        debug_print(f"複製目標路徑1: {self.target_path}", color='light_cyan')
+        debug_print(f"複製目標路徑2: {self.target_path_2}", color='light_cyan')
 
     def log_total_files(self, total_count):
         """輸出今日檔案總數"""
@@ -280,67 +285,131 @@ class FolderMonitor:
         debug_print("資料夾監控已停止", color='light_yellow')
     
     def copy_file_to_target(self, filename):
-        """複製單個檔案到目標資料夾，如果資料夾不存在則建立"""
+        """複製單個檔案到兩個目標資料夾，如果資料夾不存在則建立，包含重試機制"""
+        max_retries = 2  # 減少重試次數
+        retry_delay = 0.2  # 縮短初始延遲
+        
+        # 提前檢查來源檔案
+        source = os.path.join(self.folder_path, filename)
+        if not os.path.exists(source):
+            debug_print(f"來源檔案不存在: {filename}", color='light_red')
+            return False
+        
+        # 提前建立目標資料夾
         try:
-            # 檢查目標資料夾是否存在，不存在則建立
             if not os.path.exists(self.target_path):
                 os.makedirs(self.target_path)
-                debug_print(f"已建立目標資料夾: {self.target_path}", color='light_green')
+                debug_print(f"已建立目標資料夾1: {self.target_path}", color='light_green')
             
-            # 取得檔案路徑
-            source = os.path.join(self.folder_path, filename)
-            # 取得目標路徑
-            target = os.path.join(self.target_path, filename)
-            # 複製檔案
-            shutil.copy2(source, target)
+            if not os.path.exists(self.target_path_2):
+                os.makedirs(self.target_path_2)
+                debug_print(f"已建立目標資料夾2: {self.target_path_2}", color='light_green')
         except Exception as e:
-            debug_print(f"複製檔案失敗: {filename}, 錯誤: {str(e)}", color='light_red')
+            debug_print(f"建立目標資料夾失敗: {str(e)}", color='light_red')
+            return False
+        
+        # 準備目標路徑
+        target1 = os.path.join(self.target_path, filename)
+        target2 = os.path.join(self.target_path_2, filename)
+        
+        for attempt in range(max_retries):
+            try:
+                # 直接複製，不預先等待
+                shutil.copy2(source, target1)
+                shutil.copy2(source, target2)
+                
+                # 只在成功時才顯示詳細訊息
+                if attempt > 0:  # 如果是重試成功的
+                    debug_print(f"重試成功複製: {filename}", color='light_green')
+                
+                return True  # 成功複製
+                
+            except PermissionError as e:
+                if "WinError 32" in str(e) or "另一個程序使用" in str(e):
+                    if attempt < max_retries - 1:
+                        debug_print(f"檔案被佔用，{retry_delay:.1f}秒後重試: {filename}", color='light_yellow')
+                        time.sleep(retry_delay)
+                        retry_delay *= 1.5  # 較小的延遲增長
+                        continue
+                    else:
+                        debug_print(f"複製失敗 (檔案被佔用): {filename}", color='light_red')
+                        return False
+                else:
+                    debug_print(f"複製失敗 (權限錯誤): {filename}", color='light_red')
+                    return False
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    debug_print(f"複製錯誤，重試中: {filename}", color='light_yellow')
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    debug_print(f"複製失敗: {filename}, 錯誤: {str(e)}", color='light_red')
+                    return False
+        
+        return False
     
     def copy_today_files(self):
-        """複製今日所有新檔案，但排除特定檔案"""
+        """複製今日所有新檔案到兩個位置，但排除特定檔案"""
         today = datetime.now().date()
         copied_files = []  # 成功複製的檔案
+        failed_files = []  # 複製失敗的檔案
         excluded_files = []  # 被排除的檔案
         
         try:
-            debug_print("開始複製檔案...", color='light_cyan')
+            debug_print("開始快速複製檔案...", color='light_cyan')
+            
             # 掃描檔案
-            for file in os.listdir(self.folder_path):
-                # 取得檔案路徑
+            all_files = [f for f in os.listdir(self.folder_path) 
+                        if os.path.isfile(os.path.join(self.folder_path, f))]
+            today_files = []
+            
+            # 篩選今日檔案
+            for file in all_files:
                 file_path = os.path.join(self.folder_path, file)
-                if not os.path.isfile(file_path):
+                if datetime.fromtimestamp(os.path.getctime(file_path)).date() == today:
+                    today_files.append(file)
+            
+            if not today_files:
+                debug_print("今日沒有新檔案需要複製", color='light_yellow')
+                return
+            
+            debug_print(f"發現 {len(today_files)} 個今日檔案，開始處理...", color='light_blue')
+            
+            # 處理每個檔案
+            for i, file in enumerate(today_files, 1):
+                # 使用正則表達式檢查是否為排除的檔案
+                if self.exclude_pattern.search(file):
+                    match = self.exclude_pattern.search(file)
+                    excluded_files.append((file, match.group()))
                     continue
                 
-                # 檢查檔案日期
-                if datetime.fromtimestamp(os.path.getctime(file_path)).date() == today:
-                    # 使用正則表達式檢查是否為排除的檔案
-                    if self.exclude_pattern.search(file):
-                        # 找出匹配到的排除規則
-                        match = self.exclude_pattern.search(file)
-                        excluded_files.append((file, match.group()))  # 儲存檔案名和匹配規則
-                        continue
-                    
-                    self.copy_file_to_target(file)  # 複製檔案
-                    copied_files.append(file)  # 儲存成功複製的檔案名
+                # 顯示進度
+                debug_print(f"[{i}/{len(today_files)}] 複製: {file}", color='white')
+                
+                # 複製檔案到兩個位置
+                if self.copy_file_to_target(file):
+                    copied_files.append(file)
+                else:
+                    failed_files.append(file)
             
-            # 輸出複製結果
-            debug_print(f"===== {today.strftime('%Y-%m-%d')} =====", color='light_cyan')
-            debug_print("===== 複製成功的檔案 =====", color='light_cyan')
-            for file in copied_files:
-                debug_print(f"已複製: {file}", color='white')
+            # 簡化的結果統計
+            debug_print("======= 複製完成 =======", color='light_cyan')
+            debug_print(f"✅ 成功: {len(copied_files)} 個檔案", color='light_green')
             
-            debug_print("====== 被排除的檔案 ======", color='light_cyan')
-            for file, rule in excluded_files:
-                debug_print(f"排除檔案: {file} (匹配規則: {rule})", color='light_magenta')
+            if failed_files:
+                debug_print(f"❌ 失敗: {len(failed_files)} 個檔案", color='light_red')
+                for file in failed_files:
+                    debug_print(f"   • {file}", color='light_red')
             
-            # 輸出複製統計
-            debug_print("======= 複製統計 =======", color='light_cyan')
-            debug_print(f"   成功複製: {len(copied_files)} 個檔案", color='light_yellow')
-            debug_print(f"   已排除: {len(excluded_files)} 個檔案", color='light_yellow')
+            if excluded_files:
+                debug_print(f"⏭️  排除: {len(excluded_files)} 個檔案", color='light_yellow')
+            
+            debug_print(f"📁 目標位置1: {self.target_path}", color='light_blue')
+            debug_print(f"📁 目標位置2: {self.target_path_2}", color='light_blue')
             debug_print("========================", color='light_cyan')
 
         except Exception as e:
-            debug_print(f"複製檔案過程發生錯誤: {str(e)}", color='light_red')
+            debug_print(f"複製過程發生錯誤: {str(e)}", color='light_red')
 
 def start_folder_monitor(existing_monitor=None):
     """啟動或切換資料夾監控"""
