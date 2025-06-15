@@ -125,14 +125,13 @@ class CalendarChecker:
         days_offset = target_date.day - 1  # 從1號到目標日期的天數
         
         # 修正總偏移計算邏輯：日曆總是會在第一行顯示完整的一週
-        # 無論月初是星期幾，都要加上該月1號之前的位置數
-        # 這些位置會被前一個月的日期填充
+        # 只有當月1號是週日時，才從第二行開始；其他情況1號在第一行對應列位置
         if raw_first_weekday == 6:  # 月初是週日
-            # 即使是週日，前面仍有6個位置被前月日期填充
-            total_offset = 6 + days_offset
+            # 週日開始的月份從第二行開始，第一行被前月日期填充
+            total_offset = 7 + days_offset
         else:
-            # raw_first_weekday + 1 表示前面有多少個前月日期
-            total_offset = (raw_first_weekday + 1) + days_offset
+            # 其他情況，1號直接在第一行對應位置，前面用前月日期填充
+            total_offset = days_offset
         
         # 計算在第幾行（從0開始）
         target_row = total_offset // 7
